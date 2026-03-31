@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crispaly Salon</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
+
+<style>
+body {
+    margin: 0;
+    background: #fdfcf9;
+    font-family: 'Montserrat', sans-serif;
+    color: #333;
+}
+
+/* PORTADA */
+.portada {
+    height: 180px;
+    background: url('https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9') center/cover;
+    border-bottom-left-radius: 20px;
+    border-bottom-right-radius: 20px;
+}
+
+.container {
+    max-width: 420px;
+    margin: auto;
+    padding: 20px;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.header h1 {
+    font-family: 'Playfair Display', serif;
+    color: #b8965a;
+    margin: 0;
+}
+
+/* TARJETAS */
+.card {
+    background: white;
+    padding: 18px;
+    border-radius: 16px;
+    margin-bottom: 18px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+}
+
+/* INPUTS */
+input, select {
+    width: 100%;
+    padding: 12px;
+    margin-top: 10px;
+    border-radius: 10px;
+    border: 1px solid #e5d3b3;
+}
+
+/* BOTONES */
+button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 12px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+}
+
+.btn-main {
+    background: linear-gradient(135deg, #d4af37, #b8965a);
+    color: white;
+}
+
+.btn-wa {
+    background: #25D366;
+    color: white;
+}
+
+/* HORARIOS */
+.horario {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+}
+</style>
+</head>
+
+<body>
+
+<div class="portada"></div>
+
+<div class="container">
+
+<div class="header">
+    <h1>Crispaly Salon</h1>
+</div>
+
+<div class="card">
+    <input type="text" id="nombre" placeholder="Nombre">
+
+    <select id="servicio">
+        <option value="">Selecciona servicio</option>
+        <option>Corte</option>
+        <option>Tinte</option>
+        <option>Balayage</option>
+        <option>Depilación</option>
+    </select>
+
+    <input type="date" id="fecha">
+    <select id="hora"></select>
+
+    <button class="btn-main">Agendar cita</button>
+    <button class="btn-wa" onclick="irWhats()">WhatsApp</button>
+</div>
+
+<div class="card">
+    <h3 style="color:#b8965a;">Horarios disponibles</h3>
+    <div id="horarios">Selecciona una fecha</div>
+</div>
+
+</div>
+
+<script>
+const selectHora = document.getElementById('hora');
+const inputFecha = document.getElementById('fecha');
+const horariosDiv = document.getElementById('horarios');
+
+function generarHoras(fecha) {
+    const dia = new Date(fecha).getDay();
+
+    if (!fecha) return [];
+
+    if (dia === 0) return [];
+
+    let inicio = 10;
+    let fin = (dia === 6) ? 15 : 19;
+
+    let horas = [];
+
+    for (let h = inicio; h < fin; h++) {
+        horas.push((h < 10 ? '0' : '') + h + ':00');
+    }
+
+    return horas;
+}
+
+function cargarHorarios(fecha) {
+    const horas = generarHoras(fecha);
+
+    selectHora.innerHTML = '';
+    horariosDiv.innerHTML = '';
+
+    if (!fecha) {
+        horariosDiv.innerHTML = "Selecciona una fecha";
+        return;
+    }
+
+    if (horas.length === 0) {
+        horariosDiv.innerHTML = "Cerrado (domingo)";
+        return;
+    }
+
+    horas.forEach(h => {
+        const option = document.createElement('option');
+        option.value = h;
+        option.textContent = h;
+        selectHora.appendChild(option);
+
+        const div = document.createElement('div');
+        div.className = 'horario';
+        div.innerHTML = `<span>${h}</span><span>Disponible</span>`;
+        horariosDiv.appendChild(div);
+    });
+}
+
+inputFecha.addEventListener('change', () => {
+    cargarHorarios(inputFecha.value);
+});
+
+function irWhats() {
+    const mensaje = encodeURIComponent("Hola, quiero agendar una cita");
+    window.open(`https://wa.me/523315370476?text=${mensaje}`, "_blank");
+}
+</script>
+
+</body>
+</html>
