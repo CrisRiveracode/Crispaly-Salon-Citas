@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Agenda privada · Crispaly Salon</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: #f7f4ee; color: #302b25; font: 16px system-ui, sans-serif; }
+main { max-width: 960px; margin: auto; padding: 24px 16px 60px; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; }
+h1 { font: 32px Georgia, serif; margin: 8px 0; }
+h2 { font-size: 21px; margin-top: 0; }
+.brand { color: #806126; font-size: 14px; letter-spacing: .08em; }
+.card { background: white; border: 1px solid #e4ddce; border-radius: 16px; padding: 22px; margin-bottom: 20px; }
+.login { max-width: 420px; margin: 60px auto; }
+label { display: block; margin: 14px 0 6px; }
+input, select, button, .link { font: inherit; border-radius: 8px; padding: 12px; }
+input, select { width: 100%; border: 1px solid #cfc4b0; background: white; }
+button, .link { cursor: pointer; border: 1px solid #806126; color: white; background: #806126; text-decoration: none; display: inline-block; }
+button:disabled { opacity: .55; cursor: wait; }
+.secondary { background: white; color: #674c20; }
+.danger { color: #9a2630; background: white; border-color: #dfb4b8; }
+.row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+.row > div { flex: 1; min-width: 160px; }
+.muted { color: #70685b; }
+#mensaje, .error { color: #9a2630; white-space: pre-wrap; }
+.cita, .bloqueo { display: flex; justify-content: space-between; gap: 18px; align-items: center; padding: 18px 0; border-top: 1px solid #eee7db; }
+.cita p, .bloqueo p { margin: 5px 0; overflow-wrap: anywhere; }
+.cita strong { font-size: 19px; }
+.check { display: flex; gap: 8px; align-items: center; }
+.check input { width: auto; }
+@media (max-width: 520px) { .cita, .bloqueo { align-items: start; flex-direction: column; } .card { padding: 18px; } }
+</style>
+</head>
+<body>
+<main>
+{% if not configurado %}
+<section class="card login">
+<div class="brand">CRISPALY SALON</div>
+<h1>Agenda privada</h1>
+<p>El panel está pendiente de activación.</p>
+<p>En Render, abre <strong>Environment</strong> y agrega <strong>ADMIN_PASSWORD</strong> con una contraseña privada de al menos 12 caracteres. Guarda los cambios y vuelve a abrir esta página cuando termine el despliegue.</p>
+<a href="/">Volver al salón</a>
+</section>
+{% elif not autenticado %}
+<section class="card login">
+<div class="brand">CRISPALY SALON</div>
+<h1>Tu agenda</h1>
+<p class="muted">Entra para ver tus citas y organizar tus horarios.</p>
+<form method="post" action="/admin/login">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="password">Contraseña</label>
+<input id="password" name="password" type="password" autocomplete="current-password" required>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<button type="submit" style="width:100%; margin-top:18px">Entrar a mi agenda</button>
+</form>
+</section>
+{% else %}
+<header>
+<div><div class="brand">CRISPALY SALON</div><h1>Tu agenda</h1><span class="muted">Citas y horarios, en un solo lugar.</span></div>
+<form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">Cerrar sesión</button></form>
+</header>
+<p id="mensaje" role="status" aria-live="polite"></p>
+<section class="card">
+<h2>Citas</h2>
+<div class="row">
+<div><label for="fecha-citas">Fecha</label><input id="fecha-citas" type="date"></div>
+<button id="actualizar" class="secondary">Actualizar</button>
+<a class="link" href="/" target="_blank" rel="noopener">Agendar una cita</a>
+</div>
+<label class="check"><input id="todas" type="checkbox"> Ver todas las citas</label>
+<div id="citas" aria-live="polite">Cargando citas…</div>
+</section>
+<section class="card">
+<h2>Bloquear horarios</h2>
+<p class="muted">Reserva tiempo para descansar o cierra un día. Las clientas no podrán elegir los horarios bloqueados.</p>
+<form id="bloquear" class="row">
+<div><label for="fecha-bloqueo">Fecha</label><input id="fecha-bloqueo" type="date" required></div>
+<div><label for="hora-bloqueo">Horario</label><select id="hora-bloqueo"><option value="*">Todo el día</option></select></div>
+<button type="submit">Bloquear</button>
+</form>
+<h3>Horarios bloqueados</h3>
+<div id="bloqueos" aria-live="polite">Cargando horarios…</div>
+</section>
+<script>
+const csrf = {{ csrf|tojson }};
+const mensaje = document.getElementById('mensaje');
+const filtro = document.getElementById('fecha-citas');
+const todas = document.getElementById('todas');
+const fechaBloqueo = document.getElementById('fecha-bloqueo');
+const horaBloqueo = document.getElementById('hora-bloqueo');
+const hoy = new Intl.DateTimeFormat('en-CA', {timeZone:'America/Mexico_City', year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date());
+filtro.value = hoy;
+fechaBloqueo.value = hoy;
+fechaBloqueo.min = hoy;
+function fechaBonita(fecha) {
+    return new Date(fecha + 'T12:00:00').toLocaleDateString('es-MX', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+}
+async function api(url, method='GET', body) {
+    const respuesta = await fetch(url, {method, headers:{'Content-Type':'application/json', 'X-CSRF-Token':csrf}, body:body ? JSON.stringify(body) : undefined});
+    if (respuesta.status === 401) { location.reload(); throw new Error('Inicia sesión nuevamente.'); }
+    const data = await respuesta.json();
+    if (!respuesta.ok) throw new Error(data.error || 'No se pudo completar la acción.');
+    return data;
+}
+function texto(padre, contenido, etiqueta='p') {
+    const elemento = document.createElement(etiqueta);
+    elemento.textContent = contenido;
+    padre.appendChild(elemento);
+    return elemento;
+}
+async function accion(boton, tarea) {
+    boton.disabled = true;
+    mensaje.textContent = '';
+    try { await tarea(); } catch (error) { mensaje.textContent = error.message; }
+    finally { boton.disabled = false; }
+}
+let cargaCitas = 0;
+async function cargarCitas() {
+    const solicitud = ++cargaCitas;
+    const contenedor = document.getElementById('citas');
+    contenedor.textContent = 'Cargando citas…';
+    try {
+        const citas = await api('/citas');
+        if (solicitud !== cargaCitas) return;
+        const visibles = citas.filter(c => todas.checked || c.fecha === filtro.value);
+        contenedor.replaceChildren();
+        if (!visibles.length) { texto(contenedor, 'No hay citas para mostrar.'); return; }
+        visibles.forEach(c => {
+            const tarjeta = document.createElement('article'); tarjeta.className = 'cita';
+            const detalle = document.createElement('div');
+            texto(detalle, `${c.hora} · ${c.nombre}`, 'strong');
+            texto(detalle, fechaBonita(c.fecha));
+            texto(detalle, c.servicios.join(', '));
+            texto(detalle, `Contacto: ${c.contacto || 'Sin contacto'}`);
+            const boton = document.createElement('button'); boton.className = 'danger'; boton.textContent = 'Cancelar cita';
+            boton.onclick = () => {
+                if (!confirm(`¿Cancelar la cita de ${c.nombre} del ${c.fecha} a las ${c.hora}?`)) return;
+                accion(boton, async () => { await api('/eliminar/' + c.id, 'DELETE'); await cargarCitas(); mensaje.textContent = 'Cita cancelada. El horario vuelve a estar disponible.'; });
+            };
+            tarjeta.append(detalle, boton); contenedor.appendChild(tarjeta);
+        });
+    } catch (error) { if (solicitud === cargaCitas) contenedor.textContent = error.message; }
+}
+async function cargarBloqueos() {
+    const contenedor = document.getElementById('bloqueos');
+    contenedor.textContent = 'Cargando horarios…';
+    try {
+        const bloqueos = await api('/admin/bloqueos');
+        contenedor.replaceChildren();
+        if (!bloqueos.length) { texto(contenedor, 'No tienes horarios bloqueados.'); return; }
+        bloqueos.forEach(b => {
+            const fila = document.createElement('div'); fila.className = 'bloqueo';
+            texto(fila, `${fechaBonita(b.fecha)} · ${b.hora === '*' ? 'Todo el día' : b.hora}`);
+            const boton = document.createElement('button'); boton.className = 'secondary'; boton.textContent = 'Desbloquear';
+            boton.onclick = () => accion(boton, async () => { await api('/admin/bloqueos/' + b.id, 'DELETE'); await cargarBloqueos(); mensaje.textContent = 'Horario desbloqueado.'; });
+            fila.appendChild(boton); contenedor.appendChild(fila);
+        });
+    } catch (error) { contenedor.textContent = error.message; }
+}
+function actualizarHoras() {
+    horaBloqueo.replaceChildren(new Option('Todo el día', '*'));
+    const dia = new Date(fechaBloqueo.value + 'T12:00:00').getDay();
+    if (dia === 0) return;
+    for (let h=10; h < (dia === 6 ? 15 : 19); h++) horaBloqueo.add(new Option(`${h}:00`, `${h}:00`));
+}
+fechaBloqueo.addEventListener('change', actualizarHoras);
+filtro.addEventListener('change', cargarCitas);
+todas.addEventListener('change', () => { filtro.disabled = todas.checked; cargarCitas(); });
+document.getElementById('actualizar').onclick = cargarCitas;
+document.getElementById('bloquear').addEventListener('submit', event => {
+    event.preventDefault();
+    accion(event.currentTarget.querySelector('button'), async () => {
+        await api('/admin/bloqueos', 'POST', {fecha:fechaBloqueo.value, hora:horaBloqueo.value});
+        await cargarBloqueos(); mensaje.textContent = 'Horario bloqueado.';
+    });
+});
+actualizarHoras(); cargarCitas(); cargarBloqueos();
+</script>
+{% endif %}
+</main>
+</body>
+</html>
