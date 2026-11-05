@@ -59,7 +59,7 @@ def admin_required(view):
 
 @app.after_request
 def private_responses(response):
-    if request.path.startswith('/admin') or request.path == '/citas':
+    if request.path.startswith('/admin') or request.path == '/citas' or request.path.startswith('/horarios_ocupados/'):
         response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'

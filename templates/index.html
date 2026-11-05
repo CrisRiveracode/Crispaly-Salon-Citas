@@ -86,6 +86,9 @@ button {
     padding: 6px 0;
     border-bottom: 1px solid #eee;
 }
+.horario { background: #fffaf0; color: #654b20; text-align: left; }
+.horario[aria-pressed="true"] { background: #b8965a; color: white; }
+.horario:focus-visible { outline: 3px solid #654b20; outline-offset: 2px; }
 </style>
 </head>
 
@@ -121,7 +124,10 @@ button {
 
 <div class="card">
     <h3 style="color:#b8965a;">Horarios disponibles</h3>
-    <div id="horarios">Selecciona una fecha</div>
+    <label for="fecha-horarios">Elige el día de tu cita</label>
+    <input type="date" id="fecha-horarios" aria-label="Fecha de horarios disponibles">
+    <p>Selecciona una hora para reservar. Aquí solo aparecen los horarios libres.</p>
+    <div id="horarios" aria-live="polite">Cargando horarios…</div>
 </div>
 
 </div>
@@ -129,6 +135,7 @@ button {
 <script>
 const selectHora = document.getElementById('hora');
 const inputFecha = document.getElementById('fecha');
+const fechaHorarios = document.getElementById('fecha-horarios');
 const horariosDiv = document.getElementById('horarios');
 
 const formulario = document.getElementById('reserva');
@@ -138,7 +145,19 @@ const hoy = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit'
 }).format(new Date());
 inputFecha.min = hoy;
+fechaHorarios.min = hoy;
+inputFecha.value = hoy;
+fechaHorarios.value = hoy;
 let carga = 0;
+let fechaCargada = '';
+let reservando = false;
+
+function marcarHora() {
+    horariosDiv.querySelectorAll('button').forEach(boton => {
+        boton.setAttribute('aria-pressed', String(boton.dataset.hora === selectHora.value));
+    });
+}
+selectHora.addEventListener('change', marcarHora);
 
 function generarHoras(fecha) {
     if (!fecha) return [];
@@ -150,42 +169,67 @@ function generarHoras(fecha) {
 
 async function cargarHorarios(fecha) {
     const solicitud = ++carga;
+    const horaAnterior = fecha === fechaCargada ? selectHora.value : '';
+    inputFecha.value = fecha;
+    fechaHorarios.value = fecha;
     selectHora.replaceChildren();
     agendar.disabled = true;
     horariosDiv.textContent = fecha ? 'Cargando horarios…' : 'Selecciona una fecha';
     if (!fecha) return;
     try {
-        const respuesta = await fetch('/horarios_ocupados/' + encodeURIComponent(fecha));
+        const respuesta = await fetch('/horarios_ocupados/' + encodeURIComponent(fecha), {cache: 'no-store'});
         if (!respuesta.ok) throw new Error('No pudimos consultar los horarios. Intenta de nuevo.');
         const ocupados = await respuesta.json();
         if (solicitud !== carga) return;
+        const hoyActual = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Mexico_City', year:'numeric', month:'2-digit', day:'2-digit'
+        }).format(new Date());
+        inputFecha.min = fechaHorarios.min = hoyActual;
         const ahora = new Intl.DateTimeFormat('en-GB', {
             timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
         }).format(new Date());
         const horas = generarHoras(fecha).filter(h => !ocupados.includes(h)
-            && fecha >= hoy && (fecha !== hoy || h > ahora));
+            && fecha >= hoyActual && (fecha !== hoyActual || h > ahora));
         horariosDiv.replaceChildren();
+        fechaCargada = fecha;
         if (!horas.length) {
             horariosDiv.textContent = 'No hay horarios disponibles para esta fecha.';
             return;
         }
         horas.forEach(h => {
             selectHora.add(new Option(h, h));
-            const div = document.createElement('div');
-            div.className = 'horario';
-            div.textContent = `${h} — Disponible`;
-            horariosDiv.appendChild(div);
+            const boton = document.createElement('button');
+            boton.type = 'button';
+            boton.className = 'horario';
+            boton.dataset.hora = h;
+            boton.textContent = `${h} — Disponible`;
+            boton.addEventListener('click', () => {
+                selectHora.value = h;
+                marcarHora();
+                formulario.scrollIntoView({behavior:'smooth', block:'start'});
+            });
+            horariosDiv.appendChild(boton);
         });
-        agendar.disabled = false;
+        if (horas.includes(horaAnterior)) selectHora.value = horaAnterior;
+        marcarHora();
+        agendar.disabled = reservando;
     } catch (error) {
         if (solicitud === carga) horariosDiv.textContent = error.message;
     }
 }
 
 inputFecha.addEventListener('change', () => cargarHorarios(inputFecha.value));
+fechaHorarios.addEventListener('change', () => cargarHorarios(fechaHorarios.value));
+function actualizarDisponibilidad() {
+    if (!reservando && !document.hidden && inputFecha.value) cargarHorarios(inputFecha.value);
+}
+window.addEventListener('focus', actualizarDisponibilidad);
+document.addEventListener('visibilitychange', actualizarDisponibilidad);
+setInterval(actualizarDisponibilidad, 30000);
 formulario.addEventListener('submit', async event => {
     event.preventDefault();
     if (!formulario.reportValidity() || agendar.disabled) return;
+    reservando = true;
     const fecha = inputFecha.value;
     const hora = selectHora.value;
     agendar.disabled = true;
@@ -205,10 +249,11 @@ formulario.addEventListener('submit', async event => {
     } catch (error) {
         mensaje.textContent = error.message || 'No se pudo conectar. Intenta de nuevo.';
     } finally {
+        reservando = false;
         await cargarHorarios(inputFecha.value);
     }
 });
-cargarHorarios('');
+cargarHorarios(inputFecha.value);
 
 function irWhats() {
     const mensaje = encodeURIComponent("Hola, quiero agendar una cita");
