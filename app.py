@@ -1,5 +1,9 @@
 from flask import Flask, request, jsonify, render_template
 from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from sqlalchemy import text
+import json
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///citas.db'
@@ -31,42 +35,55 @@ def ver_citas():
     return jsonify([{
         "id": c.id,
         "nombre": c.nombre,
-        "servicio": c.servicio,
+        "servicios": json.loads(c.servicios),
         "fecha": c.fecha,
         "hora": c.hora
     } for c in citas])
 
-# Crear cita (evita duplicados)
-import json
-
+# Crear cita y reservar el horario de forma atómica en SQLite.
 @app.route('/crear_cita', methods=['POST'])
 def crear_cita():
-    data = request.json
+    data = request.get_json(silent=True)
+    campos = ('nombre', 'fecha', 'hora', 'contacto')
+    if not isinstance(data, dict) or any(
+        not isinstance(data.get(c), str) or not data[c].strip() for c in campos
+    ):
+        return jsonify(error="Completa nombre, contacto, fecha y hora"), 400
+    servicios = data.get('servicios')
+    if not isinstance(servicios, list) or not servicios or any(
+        s not in ('Corte', 'Tinte', 'Balayage', 'Depilación') for s in servicios
+    ):
+        return jsonify(error="Selecciona un servicio válido"), 400
+    if len(data['nombre']) > 100 or len(data['contacto']) > 100:
+        return jsonify(error="Nombre o contacto demasiado largo"), 400
+    try:
+        momento = datetime.strptime(data['fecha'] + ' ' + data['hora'], '%Y-%m-%d %H:%M')
+        ahora = datetime.now(ZoneInfo('America/Mexico_City')).replace(tzinfo=None)
+        cierre = 15 if momento.weekday() == 5 else 19
+        if (momento.strftime('%Y-%m-%d %H:%M') != data['fecha'] + ' ' + data['hora']
+                or momento <= ahora or momento.weekday() == 6
+                or momento.minute != 0 or not 10 <= momento.hour < cierre):
+            raise ValueError()
+    except ValueError:
+        return jsonify(error="Elige una fecha futura y un horario disponible del salón"), 400
 
-    # Solo bloquear si ya está confirmada
-    existe = Cita.query.filter_by(
-        fecha=data['fecha'],
-        hora=data['hora'],
-        estado='confirmada'
-    ).first()
-
-    if existe:
-        return jsonify({"error": "Horario ocupado"}), 400
-
-    nueva = Cita(
-        nombre=data['nombre'],
-        servicios=json.dumps(data['servicios']),
-        fecha=data['fecha'],
-        hora=data['hora'],
-        contacto=data['contacto'],
-        tipo_confirmacion=data['tipo_confirmacion'],
-        estado='pendiente'
-    )
-
-    db.session.add(nueva)
-    db.session.commit()
-
-    return jsonify({"ok": True})
+    try:
+        db.session.execute(text('BEGIN IMMEDIATE'))
+        existe = Cita.query.filter_by(fecha=data['fecha'], hora=data['hora']).first()
+        if existe:
+            db.session.rollback()
+            return jsonify(error="Este horario ya está ocupado. Elige otro."), 409
+        nueva = Cita(
+            nombre=data['nombre'].strip(), servicios=json.dumps(servicios),
+            fecha=data['fecha'], hora=data['hora'], contacto=data['contacto'].strip(),
+            tipo_confirmacion='whatsapp', estado='confirmada'
+        )
+        db.session.add(nueva)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    return jsonify(ok=True, id=nueva.id), 201
 
 # Eliminar cita
 @app.route('/eliminar/<int:id>', methods=['DELETE'])

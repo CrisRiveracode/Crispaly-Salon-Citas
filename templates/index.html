@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500&family=Montserrat:wght@300;400;500&display=swap" rel="stylesheet">
 
 <style>
+* { box-sizing: border-box; }
 body {
     margin: 0;
     background: #fdfcf9;
@@ -98,10 +99,11 @@ button {
     <h1>Crispaly Salon</h1>
 </div>
 
-<div class="card">
-    <input type="text" id="nombre" placeholder="Nombre">
+<form class="card" id="reserva">
+    <input type="text" id="nombre" placeholder="Nombre" aria-label="Nombre" maxlength="100" required>
 
-    <select id="servicio">
+    <input type="tel" id="contacto" placeholder="Teléfono de contacto" aria-label="Teléfono de contacto" maxlength="100" required>
+    <select id="servicio" aria-label="Servicio" required>
         <option value="">Selecciona servicio</option>
         <option>Corte</option>
         <option>Tinte</option>
@@ -109,12 +111,13 @@ button {
         <option>Depilación</option>
     </select>
 
-    <input type="date" id="fecha">
-    <select id="hora"></select>
+    <input type="date" id="fecha" aria-label="Fecha" required>
+    <select id="hora" aria-label="Hora" required></select>
 
-    <button class="btn-main">Agendar cita</button>
-    <button class="btn-wa" onclick="irWhats()">WhatsApp</button>
-</div>
+    <button type="submit" id="agendar" class="btn-main">Agendar cita</button>
+    <p id="mensaje" role="status" aria-live="polite"></p>
+    <button type="button" class="btn-wa" onclick="irWhats()">WhatsApp</button>
+</form>
 
 <div class="card">
     <h3 style="color:#b8965a;">Horarios disponibles</h3>
@@ -128,57 +131,84 @@ const selectHora = document.getElementById('hora');
 const inputFecha = document.getElementById('fecha');
 const horariosDiv = document.getElementById('horarios');
 
+const formulario = document.getElementById('reserva');
+const mensaje = document.getElementById('mensaje');
+const agendar = document.getElementById('agendar');
+const hoy = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit'
+}).format(new Date());
+inputFecha.min = hoy;
+let carga = 0;
+
 function generarHoras(fecha) {
-    const dia = new Date(fecha).getDay();
-
     if (!fecha) return [];
-
+    const dia = new Date(fecha + 'T12:00:00').getDay();
     if (dia === 0) return [];
-
-    let inicio = 10;
-    let fin = (dia === 6) ? 15 : 19;
-
-    let horas = [];
-
-    for (let h = inicio; h < fin; h++) {
-        horas.push((h < 10 ? '0' : '') + h + ':00');
-    }
-
-    return horas;
+    const fin = dia === 6 ? 15 : 19;
+    return Array.from({length: fin - 10}, (_, i) => `${10 + i}:00`);
 }
 
-function cargarHorarios(fecha) {
-    const horas = generarHoras(fecha);
-
-    selectHora.innerHTML = '';
-    horariosDiv.innerHTML = '';
-
-    if (!fecha) {
-        horariosDiv.innerHTML = "Selecciona una fecha";
-        return;
+async function cargarHorarios(fecha) {
+    const solicitud = ++carga;
+    selectHora.replaceChildren();
+    agendar.disabled = true;
+    horariosDiv.textContent = fecha ? 'Cargando horarios…' : 'Selecciona una fecha';
+    if (!fecha) return;
+    try {
+        const respuesta = await fetch('/horarios_ocupados/' + encodeURIComponent(fecha));
+        if (!respuesta.ok) throw new Error('No pudimos consultar los horarios. Intenta de nuevo.');
+        const ocupados = await respuesta.json();
+        if (solicitud !== carga) return;
+        const ahora = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+        }).format(new Date());
+        const horas = generarHoras(fecha).filter(h => !ocupados.includes(h)
+            && fecha >= hoy && (fecha !== hoy || h > ahora));
+        horariosDiv.replaceChildren();
+        if (!horas.length) {
+            horariosDiv.textContent = 'No hay horarios disponibles para esta fecha.';
+            return;
+        }
+        horas.forEach(h => {
+            selectHora.add(new Option(h, h));
+            const div = document.createElement('div');
+            div.className = 'horario';
+            div.textContent = `${h} — Disponible`;
+            horariosDiv.appendChild(div);
+        });
+        agendar.disabled = false;
+    } catch (error) {
+        if (solicitud === carga) horariosDiv.textContent = error.message;
     }
-
-    if (horas.length === 0) {
-        horariosDiv.innerHTML = "Cerrado (domingo)";
-        return;
-    }
-
-    horas.forEach(h => {
-        const option = document.createElement('option');
-        option.value = h;
-        option.textContent = h;
-        selectHora.appendChild(option);
-
-        const div = document.createElement('div');
-        div.className = 'horario';
-        div.innerHTML = `<span>${h}</span><span>Disponible</span>`;
-        horariosDiv.appendChild(div);
-    });
 }
 
-inputFecha.addEventListener('change', () => {
-    cargarHorarios(inputFecha.value);
+inputFecha.addEventListener('change', () => cargarHorarios(inputFecha.value));
+formulario.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!formulario.reportValidity() || agendar.disabled) return;
+    const fecha = inputFecha.value;
+    const hora = selectHora.value;
+    agendar.disabled = true;
+    mensaje.textContent = 'Guardando tu cita…';
+    try {
+        const respuesta = await fetch('/crear_cita', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                nombre: document.getElementById('nombre').value.trim(),
+                contacto: document.getElementById('contacto').value.trim(),
+                servicios: [document.getElementById('servicio').value], fecha, hora
+            })
+        });
+        const resultado = await respuesta.json();
+        if (!respuesta.ok) throw new Error(resultado.error || 'No se pudo guardar la cita.');
+        mensaje.textContent = `¡Cita confirmada! Te esperamos el ${fecha} a las ${hora}.`;
+    } catch (error) {
+        mensaje.textContent = error.message || 'No se pudo conectar. Intenta de nuevo.';
+    } finally {
+        await cargarHorarios(inputFecha.value);
+    }
 });
+cargarHorarios('');
 
 function irWhats() {
     const mensaje = encodeURIComponent("Hola, quiero agendar una cita");
