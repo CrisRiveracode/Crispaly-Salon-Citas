@@ -13,6 +13,7 @@ from datetime import timedelta
 from collections import deque
 from time import monotonic
 from threading import Lock
+from cotizaciones import register_cotizaciones
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('SALON_DATABASE_URI', 'sqlite:///citas.db')
@@ -59,7 +60,7 @@ def admin_required(view):
 
 @app.after_request
 def private_responses(response):
-    if request.path.startswith('/admin') or request.path == '/citas' or request.path.startswith('/horarios_ocupados/'):
+    if request.path.startswith('/admin') or request.path == '/citas' or request.path.startswith('/horarios_ocupados/') or request.path in ('/cotizar', '/cotizaciones'):
         response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
@@ -84,6 +85,10 @@ class Bloqueo(db.Model):
     hora = db.Column(db.String(5), nullable=False)  # * = día completo
     __table_args__ = (db.UniqueConstraint('fecha', 'hora'),)
 
+
+app.config['PUBLIC_BASE_URL'] = os.environ.get('PUBLIC_BASE_URL', 'https://crispaly-salon-citas.onrender.com')
+app.config['SALON_WHATSAPP'] = os.environ.get('SALON_WHATSAPP', '523315370476')
+register_cotizaciones(app, db, admin_required, csrf_token, valid_csrf)
 
 with app.app_context():
     db.create_all()
@@ -210,6 +215,11 @@ def admin_login():
     session.permanent = True
     session['admin'] = True
     csrf_token()
+    destino = request.form.get('next', '')
+    if destino == '/admin/cotizaciones' or (
+        destino.startswith('/admin/cotizaciones/') and not any(c in destino for c in ('?', '#', '\\'))
+    ):
+        return redirect(destino)
     return redirect(url_for('admin'))
 
 

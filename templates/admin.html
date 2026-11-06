@@ -51,6 +51,7 @@ button:disabled { opacity: .55; cursor: wait; }
 <p class="muted">Entra para ver tus citas y organizar tus horarios.</p>
 <form method="post" action="/admin/login">
 <input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="next" value="{{ request.form.get('next', request.args.get('next', '')) }}">
 <label for="password">Contraseña</label>
 <input id="password" name="password" type="password" autocomplete="current-password" required>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
@@ -62,6 +63,7 @@ button:disabled { opacity: .55; cursor: wait; }
 <div><div class="brand">CRISPALY SALON</div><h1>Tu agenda</h1><span class="muted">Citas y horarios, en un solo lugar.</span></div>
 <form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">Cerrar sesión</button></form>
 </header>
+<nav style="margin-bottom:20px"><a class="link" href="/admin/cotizaciones">Cotizaciones personalizadas</a></nav>
 <p id="mensaje" role="status" aria-live="polite"></p>
 <section class="card">
 <h2>Citas</h2>

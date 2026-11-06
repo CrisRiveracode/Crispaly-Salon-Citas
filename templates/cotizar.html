@@ -1,0 +1,103 @@
+{% extends 'cotizaciones_base.html' %}
+{% block title %}Tu cambio de look · Crispaly Salon{% endblock %}
+{% block content %}
+<header class="intro">
+<div class="eyebrow">Cotización personalizada</div>
+<h1>Cuéntanos cómo quieres verte.</h1>
+<p>Comparte fotos de tu cabello, el look que te inspira y tu presupuesto. Revisaremos tu caso y te responderemos por WhatsApp.</p>
+<p class="muted">La valoración es personalizada. Enviar una solicitud no reserva una cita ni confirma un precio.</p>
+</header>
+<form id="cotizar" enctype="multipart/form-data" method="post" action="/cotizaciones">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<section class="card">
+<h2>1. Empecemos por ti</h2>
+<div class="two">
+<div><label for="nombre">Tu nombre</label><input id="nombre" name="nombre" autocomplete="name" minlength="2" maxlength="100" required></div>
+<div><label for="telefono">Tu WhatsApp</label><input id="telefono" name="telefono" type="tel" autocomplete="tel" placeholder="Ej. 3312345678" minlength="10" maxlength="25" required><small>Para México, escribe 10 dígitos. Para otro país, incluye el código de país.</small></div>
+</div>
+</section>
+<section class="card">
+<h2>2. Tu cabello hoy</h2>
+<label for="cabello_actual">¿Cómo es tu cabello actualmente?</label>
+<textarea id="cabello_actual" name="cabello_actual" minlength="10" maxlength="2000" placeholder="Cuéntanos el largo, color actual y cómo sientes tu cabello." required></textarea>
+<label for="historial">¿Te has aplicado tintes, decoloración, alaciados o henna?</label>
+<textarea id="historial" name="historial" maxlength="2000" placeholder="Indica qué te realizaste y hace cuánto. Si no te has hecho nada, también cuéntanos."></textarea>
+<label for="fotos_actuales">Fotos de tu cabello actual</label>
+<input id="fotos_actuales" name="fotos_actuales" type="file" accept="image/jpeg,image/png,image/webp" multiple required aria-describedby="ayuda-fotos">
+<small id="ayuda-fotos">De 1 a 3 fotos con luz natural, de frente y de espalda. JPG, PNG o WebP; máximo 5 MB por foto. No necesitas mostrar tu rostro.</small>
+<div id="preview-actuales" class="preview"></div>
+</section>
+<section class="card">
+<h2>3. El look que tienes en mente</h2>
+<label for="objetivo">¿Qué te gustaría realizarte?</label>
+<textarea id="objetivo" name="objetivo" minlength="10" maxlength="2000" placeholder="Por ejemplo: un balayage caramelo que se vea natural, conservando el largo." required></textarea>
+<label for="fotos_referencia">Fotos de inspiración <span class="muted">(opcional)</span></label>
+<input id="fotos_referencia" name="fotos_referencia" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+<small>Hasta 3 fotos de ejemplo. JPG, PNG o WebP; máximo 5 MB por foto.</small>
+<div id="preview-referencias" class="preview"></div>
+<label for="referencia_url">Enlace de inspiración <span class="muted">(opcional)</span></label>
+<input id="referencia_url" name="referencia_url" type="url" maxlength="1000" placeholder="https://…">
+<label for="presupuesto">¿Cuál es tu presupuesto aproximado en pesos mexicanos?</label>
+<input id="presupuesto" name="presupuesto" type="number" min="0" max="1000000" step="0.01" placeholder="Ej. 1500" required>
+<small>Nos ayuda a recomendarte opciones. No es un cobro ni un precio confirmado.</small>
+</section>
+<section class="card">
+<label class="check"><input type="checkbox" name="consentimiento" value="si" required><span>Autorizo al salón a revisar mis fotos y datos para valorar mi solicitud y contactarme por WhatsApp. Mis fotos quedarán en el panel privado del salón.</span></label>
+<p class="muted">Primero guardaremos tu solicitud. Después podrás enviarnos el resumen por WhatsApp con un enlace privado a tus fotos.</p>
+<p id="error" class="error" role="alert"></p>
+<button id="guardar" type="submit">Guardar y continuar a WhatsApp</button>
+</section>
+</form>
+<section id="resultado" class="card" hidden aria-live="polite">
+<div class="eyebrow">Ya tenemos tu información</div>
+<h2>Falta un paso: envíanos el mensaje.</h2>
+<p id="folio"></p>
+<p>Abre WhatsApp y pulsa enviar para avisarnos. El mensaje incluye tu idea, presupuesto y el enlace privado para que el salón vea tus fotos.</p>
+<a id="enviar-whatsapp" class="button whatsapp" target="_blank" rel="noopener noreferrer">Enviar por WhatsApp</a>
+<p class="muted">Las fotos no se adjuntan al chat: las revisaremos desde tu solicitud privada. Todavía no se ha enviado ningún mensaje.</p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+const formulario = document.getElementById('cotizar');
+const error = document.getElementById('error');
+function prepararFotos(id, previewId) {
+    const input = document.getElementById(id);
+    const preview = document.getElementById(previewId);
+    let urls = [];
+    input.addEventListener('change', () => {
+        urls.forEach(url => URL.revokeObjectURL(url)); urls = [];
+        preview.replaceChildren(); input.setCustomValidity('');
+        if (input.files.length > 3 || Array.from(input.files).some(f => f.size > 5*1024*1024)) {
+            input.setCustomValidity('Elige hasta 3 fotos de máximo 5 MB cada una.');
+            input.reportValidity(); return;
+        }
+        for (const file of input.files) {
+            const img = document.createElement('img');
+            img.alt = 'Vista previa de la foto seleccionada';
+            img.src = URL.createObjectURL(file); urls.push(img.src); preview.appendChild(img);
+        }
+    });
+}
+prepararFotos('fotos_actuales', 'preview-actuales');
+prepararFotos('fotos_referencia', 'preview-referencias');
+formulario.addEventListener('submit', async event => {
+    event.preventDefault();
+    const boton = document.getElementById('guardar');
+    if (boton.disabled || !formulario.reportValidity()) return;
+    boton.disabled = true; boton.textContent = 'Guardando tus fotos…'; error.textContent = '';
+    try {
+        const response = await fetch(formulario.action, {method:'POST', body:new FormData(formulario)});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'No pudimos guardar tu solicitud.');
+        document.getElementById('folio').textContent = `Tu solicitud es la #${data.folio}.`;
+        document.getElementById('enviar-whatsapp').href = data.whatsapp_url;
+        formulario.hidden = true;
+        document.getElementById('resultado').hidden = false;
+        document.getElementById('resultado').scrollIntoView({behavior:'smooth'});
+    } catch (exception) {
+        error.textContent = exception.message || 'No pudimos conectar. Intenta nuevamente.';
+    } finally { boton.disabled = false; boton.textContent = 'Guardar y continuar a WhatsApp'; }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends 'cotizaciones_base.html' %}
+{% block content %}
+<header class="intro"><div class="eyebrow">Tu panel privado</div><h1>Cotizaciones personalizadas</h1><p>Revisa el cabello, las ideas y el presupuesto de cada clienta antes de responderle.</p></header>
+<form method="get" class="row card">
+<div><label for="estado" style="margin-top:0">Filtrar solicitudes</label><select id="estado" name="estado"><option value="">Todos los estados</option>{% for valor, etiqueta in estados.items() %}<option value="{{ valor }}" {% if valor == seleccionado %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}</select></div>
+<button type="submit">Filtrar</button>
+</form>
+{% for c in cotizaciones %}
+<article class="card">
+<div class="row"><span class="badge">{{ estados[c.estado] }}</span><small>Solicitud #{{ c.id }}</small></div>
+<h2 style="margin:14px 0">{{ c.nombre }}</h2>
+<p class="details">{{ c.objetivo }}</p>
+<p><strong>Presupuesto: {{ c.presupuesto|pesos }}</strong></p>
+<p class="muted">{{ c.fotos|length }} fotos · WhatsApp +{{ c.telefono }}</p>
+<a class="button" href="{{ url_for('cotizaciones.detalle', token=c.token) }}">Revisar solicitud</a>
+</article>
+{% else %}<section class="card"><h2>No hay solicitudes para mostrar.</h2><p>Las nuevas solicitudes aparecerán aquí, incluso si la clienta todavía no envía el mensaje de WhatsApp.</p><a href="/cotizar" target="_blank" rel="noopener">Ver formulario público</a></section>{% endfor %}
+{% endblock %}

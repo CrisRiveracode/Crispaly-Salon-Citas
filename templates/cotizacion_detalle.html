@@ -1,0 +1,81 @@
+{% extends 'cotizaciones_base.html' %}
+{% block content %}
+<a href="/admin/cotizaciones">← Todas las cotizaciones</a>
+<header class="intro"><div class="eyebrow" style="margin-top:20px">Solicitud #{{ c.id }}</div><h1>{{ c.nombre }}</h1><p>WhatsApp +{{ c.telefono }}</p><span id="estado-actual" class="badge">{{ estados[c.estado] }}</span></header>
+<section class="card">
+<h2>Lo que busca tu clienta</h2>
+<div class="summary"><p><strong>Presupuesto aproximado: {{ c.presupuesto|pesos }}</strong></p><p class="details">{{ c.objetivo }}</p></div>
+<h3>Su cabello actual</h3><p class="details">{{ c.cabello_actual }}</p>
+<h3>Tintes y tratamientos anteriores</h3><p class="details">{{ c.historial or 'Sin especificar' }}</p>
+{% if c.referencia_url %}<p><a href="{{ c.referencia_url }}" target="_blank" rel="noopener noreferrer">Abrir enlace de inspiración</a></p>{% endif %}
+</section>
+{% for tipo, titulo in [('actual', 'Fotos de su cabello'), ('referencia', 'Fotos de inspiración')] %}
+<section class="card"><h2>{{ titulo }}</h2><div class="gallery">
+{% for foto in c.fotos if foto.tipo == tipo %}
+<a href="{{ url_for('cotizaciones.foto', token=c.token, foto_id=foto.id) }}" target="_blank" rel="noopener"><img loading="lazy" src="{{ url_for('cotizaciones.foto', token=c.token, foto_id=foto.id) }}" alt="{{ titulo }} · foto {{ loop.index }}"><small>Ampliar foto</small></a>
+{% else %}<p class="muted">No adjuntó fotos de inspiración.</p>{% endfor %}
+</div></section>
+{% endfor %}
+<section class="card">
+<h2>Seguimiento</h2>
+<form id="seguimiento" class="row"><div><label for="estado">Estado de la solicitud</label><select id="estado">{% for valor, etiqueta in estados.items() %}<option value="{{ valor }}" {% if valor == c.estado %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}</select></div><button type="submit" class="secondary">Guardar estado</button></form>
+<p id="mensaje-estado" role="status"></p>
+</section>
+<section class="card">
+<h2>Prepara tu cotización</h2>
+<p>Escribe el precio estimado y qué incluye. Después abre WhatsApp, revisa el mensaje y pulsa enviar.</p>
+<form id="respuesta">
+<label for="importe">Importe estimado en MXN</label><input id="importe" type="number" min="0.01" max="1000000" step="0.01" value="{{ '%.2f'|format(c.importe / 100) if c.importe is not none else '' }}" required>
+<label for="observaciones">Qué incluye y recomendaciones</label><textarea id="observaciones" minlength="10" maxlength="2000" placeholder="Incluye… Duración aproximada… Recomendamos…" required>{{ c.respuesta }}</textarea>
+<p id="mensaje-respuesta" role="status"></p>
+<button type="submit">Preparar respuesta</button>
+</form>
+<div id="respuesta-lista" hidden style="margin-top:20px"><a id="responder-whatsapp" class="button whatsapp" target="_blank" rel="noopener noreferrer">Abrir WhatsApp con la cotización</a><p class="muted">La respuesta está preparada. Se enviará únicamente cuando pulses enviar dentro de WhatsApp.</p></div>
+</section>
+<section class="card"><h2>Eliminar solicitud</h2><p>Elimina de forma permanente los datos y las fotos de esta solicitud cuando ya no necesites conservarlos.</p><button id="eliminar" class="danger">Eliminar solicitud y fotos</button><p id="mensaje-eliminar" role="status"></p></section>
+{% endblock %}
+{% block scripts %}
+<script>
+const csrf = {{ csrf|tojson }};
+const base = {{ url_for('cotizaciones.detalle', token=c.token)|tojson }};
+const estados = {{ estados|tojson }};
+async function guardar(url, metodo, datos) {
+    const response = await fetch(url, {method:metodo, headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:datos ? JSON.stringify(datos) : undefined});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo completar la acción.');
+    return data;
+}
+document.getElementById('seguimiento').addEventListener('submit', async event => {
+    event.preventDefault(); const boton = event.currentTarget.querySelector('button'); boton.disabled = true;
+    const mensaje = document.getElementById('mensaje-estado');
+    try {
+        const estado = document.getElementById('estado').value;
+        await guardar(base+'/estado', 'POST', {estado});
+        document.getElementById('estado-actual').textContent = estados[estado]; mensaje.textContent = 'Estado guardado.';
+    } catch (error) { mensaje.textContent = error.message; }
+    finally { boton.disabled = false; }
+});
+function invalidarRespuesta() { document.getElementById('respuesta-lista').hidden = true; }
+document.getElementById('importe').addEventListener('input', invalidarRespuesta);
+document.getElementById('observaciones').addEventListener('input', invalidarRespuesta);
+document.getElementById('respuesta').addEventListener('submit', async event => {
+    event.preventDefault(); const boton = event.currentTarget.querySelector('button'); boton.disabled = true;
+    const mensaje = document.getElementById('mensaje-respuesta'); invalidarRespuesta();
+    try {
+        const data = await guardar(base+'/respuesta', 'POST', {importe:document.getElementById('importe').value, observaciones:document.getElementById('observaciones').value});
+        document.getElementById('responder-whatsapp').href = data.whatsapp_url;
+        document.getElementById('respuesta-lista').hidden = false;
+        document.getElementById('estado-actual').textContent = estados.respuesta_preparada;
+        document.getElementById('estado').value = 'respuesta_preparada';
+        mensaje.textContent = 'Cotización guardada. Ya puedes abrir WhatsApp.';
+    } catch (error) { mensaje.textContent = error.message; }
+    finally { boton.disabled = false; }
+});
+document.getElementById('eliminar').addEventListener('click', async event => {
+    if (!confirm('¿Eliminar permanentemente esta solicitud y todas sus fotos?')) return;
+    event.currentTarget.disabled = true;
+    try { await guardar(base, 'DELETE'); location.href = '/admin/cotizaciones'; }
+    catch (error) { document.getElementById('mensaje-eliminar').textContent = error.message; document.getElementById('eliminar').disabled = false; }
+});
+</script>
+{% endblock %}

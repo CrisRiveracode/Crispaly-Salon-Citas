@@ -1,3 +1,4 @@
 flask
 flask_sqlalchemy
 gunicorn
+Pillow>=12.0.0

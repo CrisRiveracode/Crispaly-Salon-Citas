@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if request.path.startswith('/admin') %}<meta name="robots" content="noindex, nofollow">{% endif %}
+<title>{% block title %}Cotizaciones · Crispaly Salon{% endblock %}</title>
+<style>
+* { box-sizing:border-box; }
+body { margin:0; font:16px/1.6 system-ui,sans-serif; color:#342d25; background:#faf7f1; }
+main { max-width:960px; padding:24px 18px 70px; margin:auto; }
+nav, .row { display:flex; gap:14px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
+nav { margin-bottom:32px; }
+a { color:#795923; }
+.brand { font:24px Georgia,serif; text-decoration:none; color:#795923; }
+h1 { font:clamp(30px,5vw,42px)/1.15 Georgia,serif; margin:16px 0; }
+h2 { font-size:21px; margin-top:0; }
+h3 { font-size:17px; }
+p { margin:10px 0; }
+.intro { max-width:700px; margin-bottom:28px; }
+.eyebrow { color:#89662b; font-size:13px; letter-spacing:.1em; text-transform:uppercase; }
+.card { border:1px solid #e9dfce; background:white; border-radius:18px; padding:24px; margin-bottom:20px; }
+label { display:block; font-weight:600; margin:16px 0 6px; }
+input, textarea, select { width:100%; padding:12px; border:1px solid #cdbfa9; border-radius:9px; background:white; font:inherit; }
+textarea { min-height:110px; resize:vertical; }
+input[type=checkbox] { width:auto; flex:none; }
+.check { display:flex; gap:12px; align-items:start; font-weight:400; }
+button, .button { display:inline-block; font:inherit; padding:12px 20px; border-radius:9px; border:1px solid #806126; color:white; background:#806126; cursor:pointer; text-decoration:none; text-align:center; }
+button:disabled { opacity:.55; cursor:wait; }
+.secondary { background:white; color:#795923; }
+.whatsapp { background:#176d40; border-color:#176d40; }
+.danger { background:white; color:#a02430; border-color:#cfaeb3; }
+.muted, small { color:#726657; }
+small { display:block; margin-top:5px; }
+.error { color:#a02430; }
+[hidden] { display:none !important; }
+.preview, .gallery { display:flex; gap:12px; flex-wrap:wrap; margin-top:16px; }
+.preview img { width:110px; height:110px; object-fit:cover; border-radius:9px; }
+.gallery a { max-width:220px; }
+.gallery img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:12px; }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+.badge { display:inline-block; background:#f3ecd9; border-radius:20px; padding:4px 12px; font-size:14px; }
+.details { white-space:pre-wrap; overflow-wrap:anywhere; }
+.summary { border-left:3px solid #b8965a; padding-left:16px; }
+@media(max-width:600px) { .two { grid-template-columns:1fr; gap:0; } .card { padding:20px; } .button, button { max-width:100%; } }
+</style>
+</head>
+<body><main>
+<nav><a class="brand" href="/">Crispaly Salon</a>
+{% if request.path.startswith('/admin') %}<a href="/admin">Volver a la agenda</a>{% else %}<a href="/">Reservar una cita</a>{% endif %}
+</nav>
+{% block content %}{% endblock %}
+</main>{% block scripts %}{% endblock %}</body>
+</html>
