@@ -27,31 +27,31 @@ SQLite necesita un disco persistente. El sistema de archivos temporal de Render 
 - El panel permite filtrar por estado, preparar el importe y observaciones, abrir un mensaje dirigido a la clienta y eliminar solicitudes con sus fotos. «Respuesta preparada» no significa que WhatsApp haya entregado el mensaje.
 - La solicitud no reserva una cita, no cobra y no confirma un precio. El número del cliente es declarado por ella; esta versión no verifica que sea su propietario.
 
-## Portal de clientes y SMS
+## Portal de clientes sin SMS
 
 - Portal público: `/clientes`, registro/acceso: `/clientes/acceso`, perfil: `/clientes/perfil`.
-- Panel del salón: `/admin/clientes`. Usa la misma contraseña administrativa existente.
-- El teléfono es obligatorio, se normaliza al formato internacional E.164 y tiene una restricción única en la base de datos. Distintas formas de escribir el mismo número recuperan una sola cuenta. Verificar un teléfono no garantiza una sola cuenta por persona si tiene varios números.
-- No se crea una cuenta hasta que Twilio Verify confirma el código. El acceso posterior también se hace por SMS. No existen códigos maestros ni formas públicas de omitir la verificación.
+- Panel del salón: `/admin/clientes`. Usa la contraseña administrativa existente.
+- El registro requiere nombre completo y apellidos, teléfono único y contraseña de 10 a 128 caracteres con confirmación. No requiere Twilio ni envía SMS; no hay cargos de verificación. Las credenciales anteriores de Twilio no se usan en esta versión.
+- Los teléfonos se normalizan a E.164: `3312345678`, `+52 33 1234 5678` y `523312345678` identifican la misma cuenta. La restricción única en la base de datos impide duplicados incluso con solicitudes simultáneas. No se demuestra la propiedad del número al registrar la cuenta.
+- Las contraseñas se guardan como hashes scrypt; nunca en texto plano. El ingreso admite cinco intentos por teléfono cada quince minutos. Establecer `SECRET_KEY` con un secreto aleatorio estable en Render y conservarlo entre despliegues.
 
-### Activar SMS reales con Twilio Verify
+### Verificación presencial y bono
 
-1. Crear una cuenta de Twilio y habilitar un servicio **Verify** para SMS. La cuenta y el servicio deben admitir el envío al país de los clientes (México inicialmente). Una cuenta de prueba puede limitar los destinatarios a números previamente autorizados. Twilio cobra según sus tarifas; no se presupone que los mensajes sean gratuitos.
-2. En Render → Environment, configurar de forma privada `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` y `TWILIO_VERIFY_SERVICE_SID`. No compartir sus valores por chat ni subirlos a Git. Configurar también `SECRET_KEY` con un valor aleatorio fuerte, estable y privado para las sesiones; conservarlo entre despliegues.
-3. Guardar y desplegar. El backend necesita HTTPS saliente a `verify.twilio.com`; no hace falta configurar un webhook para este flujo.
-4. Revisar en Twilio los permisos geográficos y sus protecciones antifraude. La aplicación limita cada teléfono a un envío por minuto, tres por hora, cinco comprobaciones por código y una ventana de diez minutos. Hay un límite global inicial de **50 intentos de envío al día UTC**, también registrado en la base de datos. Los fallos de envío consumen cuota para evitar reintentos sin control.
-5. Probar con un teléfono real: solicitar código, recibir SMS, confirmar y comprobar que volver a entrar con el mismo teléfono recupera la misma cuenta. Este paso no se pudo ejecutar durante el desarrollo porque no había cuenta ni credenciales de Twilio configuradas. Las pruebas automatizadas y del navegador usaron un proveedor simulado en servidores de prueba aislados; ese proveedor no está disponible en la aplicación desplegada.
+- El salón entra en `/admin/clientes`, abre el perfil y confirma presencialmente que nombre y teléfono corresponden a la clienta.
+- «Confirmar identidad presencial y dar 10 puntos extra» otorga **10 puntos adicionales una sola vez**. La verificación tiene una fila única por cliente y se confirma en una transacción: repetir el clic o enviar solicitudes simultáneas no repite el bono.
+- El cliente puede usar su cuenta antes de verificarla. El portal muestra si la verificación está pendiente y desglosa el bono una vez concedido.
+- Para recuperar una cuenta, primero se confirma la identidad presencialmente y después se establece una contraseña nueva en el panel. La nueva contraseña invalida las sesiones anteriores. Nunca se recupera acceso solo por escribir un número.
+- Las cuentas de la versión anterior se conservan. Si aún no tienen contraseña, no se pueden reclamar con un nuevo registro: el salón debe confirmar presencialmente al titular y establecer su contraseña. Las antiguas sesiones SMS deben volver a iniciar sesión.
+- Se añaden tablas para contraseñas, confirmaciones presenciales, asociaciones de reservas e intentos de acceso. No se modifican ni eliminan las tablas existentes. El campo legado `cliente.verificado` no determina el estado presencial; las nuevas cuentas no se presentan como verificadas por ese campo.
 
-Si faltan las credenciales, el registro muestra que está pendiente de activación. Reservas y cotizaciones siguen funcionando. No se guarda un usuario sin verificar el teléfono ni se presenta un envío simulado como real.
+### Servicios, puntos, citas y retoques
 
-### Servicios, puntos y retoques
+- Foto de perfil opcional y privada: hasta 5 MB, JPG/PNG/WebP, recodificada sin metadatos EXIF. El nombre completo es editable. Cambiar el teléfono requiere atención del salón y no está habilitado desde el perfil.
+- Las reservas realizadas mientras el cliente tiene sesión iniciada quedan asociadas a su cuenta. El servidor toma su nombre y teléfono del perfil, sin permitir sustituirlos con datos enviados desde el navegador.
+- No se muestran reservas anteriores solo porque alguien escribió el teléfono al registrarse. Tras la confirmación presencial, el portal también puede mostrar las reservas con ese mismo teléfono. Cancelar una cita elimina su asociación a la cuenta para evitar errores si SQLite reutiliza identificadores.
+- Solo el administrador registra servicios **realizados**: fecha, importe opcional, indicaciones visibles para el cliente, si fue retoque y fecha sugerida del siguiente. Las fechas sugeridas no crean reservas. El importe no equivale a un pago ni una deuda.
+- Se suman **10 puntos por visita realizada** por defecto, además del bono presencial. `PUNTOS_POR_VISITA` permite un entero entre 1 y 1000 para visitas futuras; las anteriores conservan sus puntos. Se reconoce una visita por cliente y día, agrupando todos sus servicios. No hay canjes todavía.
+- Anular una visita retira sus puntos, conserva el historial y no afecta el bono presencial. Una cita programada por sí sola no genera puntos.
+- Ideas por estación en México: selección editorial, no tendencias de un servicio en tiempo real. Fotos ilustrativas de Pexels (IDs 3993320, 3993449, 3992874), bajo https://www.pexels.com/license/. Se enlazan sus fuentes y no se presentan como trabajos propios. El navegador las carga desde `images.pexels.com`.
 
-- La foto de perfil es opcional y privada. Se valida y recodifica igual que las fotos de cotizaciones, quitando metadatos; máximo 5 MB, JPG/PNG/WebP. Nombre editable; el cambio de teléfono no está habilitado sin una nueva verificación.
-- Las citas programadas se asocian al número de teléfono verificado, incluyendo las reservas anteriores con ese mismo número. Si el cliente está conectado al reservar, el servidor usa su nombre y teléfono verificados.
-- Solo el administrador registra los servicios **realizados**, con fecha, importe opcional, indicaciones visibles para el cliente, si fue retoque y fecha sugerida para el siguiente. Las fechas sugeridas no son reservas. El importe registrado no equivale a un pago ni una deuda.
-- Se suman **10 puntos por visita realizada** por defecto. `PUNTOS_POR_VISITA` puede establecer un entero de 1 a 1000 para futuras visitas; las anteriores conservan los puntos asignados. Se registra una visita por cliente y día: hay que agrupar todos los servicios de esa visita. La restricción única impide duplicar puntos por doble envío. Todavía no hay canjes ni recompensas económicas.
-- Anular un registro retira sus puntos, sin borrar el historial de la corrección. Repetir la anulación no resta más puntos. Una cita reservada por sí sola nunca genera puntos.
-- Las ideas de temporada son una selección editorial por estación en México, no tendencias obtenidas de un servicio en tiempo real. Fotografías ilustrativas de Pexels (IDs 3993320, 3993449, 3992874), bajo su licencia de uso: https://www.pexels.com/license/. Se enlazan sus fuentes y no se presentan como trabajos propios del salón. El navegador carga las fotos desde `images.pexels.com`.
-- Las tablas de clientes, verificaciones, envíos y visitas se crean al arrancar, sin alterar ni borrar las citas y cotizaciones existentes.
-
-**Persistencia:** antes de registrar clientes reales, usar almacenamiento persistente y respaldos de la base de datos. Ahí se guardan teléfonos verificados, fotos, historial y puntos. El sistema de archivos temporal de Render no los conserva entre despliegues. El acceso por SMS demuestra control del número en ese momento; los números de teléfono pueden reciclarse y las cuentas inactivas deben revisarse antes de reutilizar su historial.
+**Persistencia:** usar almacenamiento persistente y respaldos antes de registrar clientes reales. Ahí se conservan cuentas, hashes, fotos, historial y puntos. El sistema de archivos temporal de Render no conserva esos datos entre despliegues.

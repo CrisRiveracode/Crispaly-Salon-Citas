@@ -1,10 +1,10 @@
 {% extends 'clientes_base.html' %}
 {% block content %}
-<header class="intro"><div class="eyebrow">Mi perfil</div><h1>Aquí eres tú.</h1><p>Tu teléfono ya está verificado y es el identificador de tu cuenta.</p></header>
+<header class="intro"><div class="eyebrow">Mi perfil</div><h1>Aquí eres tú.</h1><p>Tu teléfono es el identificador único de tu cuenta. {{ 'Tu cuenta ya fue verificada presencialmente.' if presencial else 'La verificación presencial es opcional y suma 10 puntos extra una sola vez.' }}</p></header>
 <section class="card access"><div class="avatar">{{ cliente.nombre[:1]|upper }}{% if cliente.foto %}<img src="/clientes/perfil/foto" alt="Tu foto de perfil">{% endif %}</div>
 <form id="perfil" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
-<label for="nombre">Nombre</label><input id="nombre" name="nombre" value="{{ cliente.nombre }}" minlength="2" maxlength="100" required>
-<label for="telefono">Teléfono verificado</label><input id="telefono" value="{{ cliente.telefono }}" readonly><small>Para cambiar tu teléfono, contacta al salón. No se cambia sin una nueva verificación.</small>
+<label for="nombre">Nombre completo y apellidos</label><input id="nombre" name="nombre" value="{{ cliente.nombre }}" minlength="5" maxlength="100" required>
+<label for="telefono">Teléfono registrado</label><input id="telefono" value="{{ cliente.telefono }}" readonly><small>Para cambiar tu teléfono, contacta al salón. El equipo confirmará tu identidad presencialmente.</small>
 <label for="foto">Foto de perfil <span class="muted">(opcional)</span></label><input id="foto" name="foto" type="file" accept="image/jpeg,image/png,image/webp"><small>JPG, PNG o WebP, máximo 5 MB. Solo tú y el equipo autorizado pueden verla.</small>
 <div class="row" style="justify-content:start;margin-top:20px"><button type="submit">Guardar mi perfil</button>{% if cliente.foto %}<button id="quitar-foto" class="secondary" type="button">Quitar foto</button>{% endif %}</div>
 </form><p id="mensaje" role="status">{{ 'Perfil actualizado.' if request.args.get('guardado') else '' }}</p>

@@ -159,6 +159,9 @@ def crear_cita():
             tipo_confirmacion='whatsapp', estado='confirmada'
         )
         db.session.add(nueva)
+        db.session.flush()
+        if cliente:
+            app.extensions['clientes']['vincular_cita'](nueva, cliente)
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -174,6 +177,7 @@ def eliminar(id):
     if not cita:
         return jsonify({"error": "No existe"}), 404
 
+    app.extensions['clientes']['desvincular_cita'](cita)
     db.session.delete(cita)
     db.session.commit()
 

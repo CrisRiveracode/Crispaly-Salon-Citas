@@ -1,5 +1,4 @@
-"""Portal de clientes: identidad verificada, historial y visitas realizadas."""
-import base64
+"""Portal de clientes con contraseña y verificación presencial opcional."""
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from io import BytesIO
@@ -7,17 +6,15 @@ import json
 import os
 import re
 import secrets
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 import phonenumbers
 from flask import (Blueprint, jsonify, redirect, render_template, request,
                    send_file, session, url_for)
-from sqlalchemy import text, func
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from zoneinfo import ZoneInfo
 from cotizaciones import dinero_centavos, foto_jpeg
+from werkzeug.security import generate_password_hash, check_password_hash
 
 
 def ahora_utc():
@@ -39,57 +36,24 @@ def telefono_normalizado(value):
         raise ValueError('Revisa el teléfono. Para otro país, incluye + y el código de país.')
 
 
-class VerificacionNoDisponible(Exception):
-    pass
+def nombre_completo(value):
+    if not isinstance(value, str):
+        raise ValueError('Escribe tu nombre completo y apellidos.')
+    value = ' '.join(value.split())
+    if not 5 <= len(value) <= 100 or len(value.split()) < 2:
+        raise ValueError('Escribe tu nombre completo y apellidos, de 5 a 100 caracteres.')
+    return value
 
 
-class TwilioVerify:
-    """Solo Twilio decide si el código es válido. Nunca hay un código local de acceso."""
-    def __init__(self):
-        self.account = os.environ.get('TWILIO_ACCOUNT_SID', '')
-        self.token = os.environ.get('TWILIO_AUTH_TOKEN', '')
-        self.service = os.environ.get('TWILIO_VERIFY_SERVICE_SID', '')
-
-    @property
-    def configured(self):
-        return bool(re.fullmatch(r'AC[\da-fA-F]{32}', self.account)
-                    and re.fullmatch(r'VA[\da-fA-F]{32}', self.service) and self.token)
-
-    def _post(self, endpoint, data):
-        if not self.configured:
-            raise VerificacionNoDisponible()
-        authorization = base64.b64encode(f'{self.account}:{self.token}'.encode()).decode()
-        req = Request(f'https://verify.twilio.com/v2/Services/{self.service}/{endpoint}',
-                      data=urlencode(data).encode(), method='POST',
-                      headers={'Authorization': 'Basic ' + authorization,
-                               'Content-Type': 'application/x-www-form-urlencoded'})
-        try:
-            with urlopen(req, timeout=12) as response:
-                data = json.load(response)
-                if not isinstance(data, dict):
-                    raise VerificacionNoDisponible()
-                return data
-        except HTTPError as error:
-            error.close()
-            # Twilio expira/elimina las verificaciones consumidas. No es aprobación.
-            if endpoint == 'VerificationCheck' and error.code == 404:
-                return {'status': 'expired'}
-            raise VerificacionNoDisponible() from None
-        except (URLError, TimeoutError, OSError, ValueError):
-            raise VerificacionNoDisponible() from None
-
-    def send(self, telefono):
-        response = self._post('Verifications', {'To': telefono, 'Channel': 'sms'})
-        if response.get('status') != 'pending':
-            raise VerificacionNoDisponible()
-
-    def check(self, telefono, codigo):
-        return self._post('VerificationCheck', {'To': telefono, 'Code': codigo}).get('status') == 'approved'
+def password_valida(value):
+    if not isinstance(value, str) or not 10 <= len(value) <= 128 or not value.strip():
+        raise ValueError('Usa una contraseña de 10 a 128 caracteres.')
+    return value
 
 
 def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
     bp = Blueprint('clientes', __name__)
-    app.extensions['sms_verify'] = TwilioVerify()
+    dummy_hash = generate_password_hash(secrets.token_urlsafe(32))
     puntos_visita = 10
     try:
         puntos_visita = max(1, min(1000, int(os.environ.get('PUNTOS_POR_VISITA', '10'))))
@@ -100,24 +64,29 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
         id = db.Column(db.Integer, primary_key=True)
         nombre = db.Column(db.String(100), nullable=False)
         telefono = db.Column(db.String(16), unique=True, nullable=False, index=True)
+        # Campo legado de la primera versión: no determina la verificación presencial.
         verificado = db.Column(db.DateTime, nullable=False, default=ahora_utc)
         creado = db.Column(db.DateTime, nullable=False, default=ahora_utc)
         foto = db.deferred(db.Column(db.LargeBinary))
 
-    class VerificacionTelefono(db.Model):
+    class CuentaCliente(db.Model):
+        cliente_id = db.Column(db.Integer, db.ForeignKey('cliente.id'), primary_key=True)
+        password_hash = db.Column(db.Text, nullable=False)
+        version = db.Column(db.Integer, nullable=False, default=1)
+
+    class VerificacionPresencial(db.Model):
+        cliente_id = db.Column(db.Integer, db.ForeignKey('cliente.id'), primary_key=True)
+        fecha = db.Column(db.DateTime, nullable=False, default=ahora_utc)
+        puntos = db.Column(db.Integer, nullable=False, default=10)
+
+    class ReservaCliente(db.Model):
+        cita_id = db.Column(db.Integer, db.ForeignKey('cita.id'), primary_key=True)
+        cliente_id = db.Column(db.Integer, db.ForeignKey('cliente.id'), nullable=False, index=True)
+
+    class IntentoAccesoCliente(db.Model):
         telefono = db.Column(db.String(16), primary_key=True)
-        referencia = db.Column(db.String(64), unique=True)
-        nombre = db.Column(db.String(100), nullable=False)
-        enviado = db.Column(db.DateTime, nullable=False)
-        ventana = db.Column(db.DateTime, nullable=False)
-        envios = db.Column(db.Integer, nullable=False, default=0)
+        ventana = db.Column(db.DateTime, nullable=False, default=ahora_utc)
         intentos = db.Column(db.Integer, nullable=False, default=0)
-
-    class EnvioSms(db.Model):
-        id = db.Column(db.Integer, primary_key=True)
-        fecha = db.Column(db.DateTime, nullable=False, default=ahora_utc, index=True)
-
-    app.config.setdefault('SMS_LIMITE_DIARIO', 50)
 
     class VisitaCliente(db.Model):
         id = db.Column(db.Integer, primary_key=True)
@@ -135,7 +104,12 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
 
     def actual():
         identity = session.get('cliente_id')
-        return db.session.get(Cliente, identity) if isinstance(identity, int) else None
+        if not isinstance(identity, int):
+            return None
+        cuenta = db.session.get(CuentaCliente, identity)
+        if not cuenta or session.get('cliente_version') != cuenta.version:
+            return None
+        return db.session.get(Cliente, identity)
 
     def require_customer(view):
         @wraps(view)
@@ -162,131 +136,122 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
         return db.session.scalars(db.select(VisitaCliente).filter_by(cliente_id=cliente_id)
                                   .order_by(VisitaCliente.fecha.desc(), VisitaCliente.id.desc())).all()
 
+    def verificacion(cliente_id):
+        return db.session.get(VerificacionPresencial, cliente_id)
+
+    def puntos_totales(cliente_id, historial):
+        bono = verificacion(cliente_id)
+        return sum(v.puntos for v in historial if not v.anulada) + (bono.puntos if bono else 0)
+
+    def vincular_cita(cita, cliente):
+        db.session.add(ReservaCliente(cita_id=cita.id, cliente_id=cliente.id))
+
     def citas_cliente(cliente):
-        # Incluye las reservas anteriores que registraron este mismo teléfono.
+        # Un teléfono declarado sin verificar nunca da acceso automático a reservas anteriores.
+        vinculadas = set(db.session.scalars(db.select(ReservaCliente.cita_id)
+                         .filter_by(cliente_id=cliente.id)).all())
+        presencial = bool(verificacion(cliente.id))
         resultado = []
         for cita in db.session.scalars(db.select(Cita).order_by(Cita.fecha, Cita.hora)).all():
-            try:
-                if telefono_normalizado(cita.contacto) == cliente.telefono:
-                    resultado.append(cita)
-            except ValueError:
-                continue
+            if cita.id in vinculadas:
+                resultado.append(cita)
+            elif presencial:
+                try:
+                    if telefono_normalizado(cita.contacto) == cliente.telefono:
+                        resultado.append(cita)
+                except ValueError:
+                    pass
         return resultado
 
+    def desvincular_cita(cita):
+        ReservaCliente.query.filter_by(cita_id=cita.id).delete(synchronize_session=False)
+
     app.extensions['clientes'] = {'actual': actual, 'Cliente': Cliente,
-                                  'VisitaCliente': VisitaCliente,
-                                  'VerificacionTelefono': VerificacionTelefono}
+                                  'VisitaCliente': VisitaCliente, 'CuentaCliente': CuentaCliente,
+                                  'VerificacionPresencial': VerificacionPresencial,
+                                  'ReservaCliente': ReservaCliente, 'vincular_cita': vincular_cita,
+                                  'desvincular_cita': desvincular_cita}
+
+    def iniciar_sesion(cliente, cuenta):
+        session.pop('telefono_pendiente', None)
+        session.pop('csrf', None)
+        session['cliente_id'] = cliente.id
+        session['cliente_version'] = cuenta.version
+        session.permanent = True
+        csrf_token()
 
     @bp.route('/clientes/acceso')
     def acceso():
         if actual():
             return redirect(url_for('clientes.portal'))
-        referencia = session.get('telefono_pendiente')
-        pending = db.session.scalar(db.select(VerificacionTelefono).filter_by(referencia=referencia)) if referencia else None
-        activo = bool(pending and ahora_utc() < pending.enviado + timedelta(minutes=10))
-        return render_template('clientes_acceso.html', csrf=csrf_token(),
-                               disponible=app.extensions['sms_verify'].configured,
-                               pendiente=activo, telefono=pending.telefono if activo else '')
+        return render_template('clientes_acceso.html', csrf=csrf_token())
 
-    @bp.route('/clientes/verificacion/enviar', methods=['POST'])
-    def enviar_codigo():
+    @bp.route('/clientes/registro', methods=['POST'])
+    def registro():
         if not valid_csrf():
             return jsonify(error='Recarga la página e intenta de nuevo.'), 400
-        provider = app.extensions['sms_verify']
-        if not provider.configured:
-            return jsonify(error='El registro por SMS está pendiente de activación. Puedes seguir reservando o solicitar una cotización.'), 503
         data = request.get_json(silent=True)
         try:
             if not isinstance(data, dict):
-                raise ValueError('Completa tu nombre y teléfono.')
-            nombre = data.get('nombre', '')
-            if not isinstance(nombre, str) or not 2 <= len(nombre.strip()) <= 100:
-                raise ValueError('Escribe tu nombre, de 2 a 100 caracteres.')
-            if data.get('consentimiento') is not True:
-                raise ValueError('Autoriza el envío del código para verificar tu teléfono.')
+                raise ValueError('Completa los datos del registro.')
+            nombre = nombre_completo(data.get('nombre'))
             telefono = telefono_normalizado(data.get('telefono'))
+            password = password_valida(data.get('password'))
+            if data.get('password_confirmacion') != password:
+                raise ValueError('Las contraseñas no coinciden.')
+            if data.get('consentimiento') is not True:
+                raise ValueError('Acepta el registro de tus datos para crear tu cuenta.')
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
+        password_hash = generate_password_hash(password)
+        cliente = Cliente(nombre=nombre, telefono=telefono)
+        db.session.add(cliente)
+        try:
+            db.session.flush()
+            cuenta = CuentaCliente(cliente_id=cliente.id, password_hash=password_hash)
+            db.session.add(cuenta)
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            return jsonify(error='Este teléfono ya tiene una cuenta. Inicia sesión o solicita ayuda en el salón.'), 409
+        iniciar_sesion(cliente, cuenta)
+        return jsonify(ok=True, destino='/clientes'), 201
+
+    @bp.route('/clientes/entrar', methods=['POST'])
+    def entrar():
+        if not valid_csrf():
+            return jsonify(error='Recarga la página e intenta de nuevo.'), 400
+        data = request.get_json(silent=True)
+        try:
+            if not isinstance(data, dict):
+                raise ValueError('Escribe tu teléfono y contraseña.')
+            telefono = telefono_normalizado(data.get('telefono'))
+            password = data.get('password', '')
+            if not isinstance(password, str) or not 1 <= len(password) <= 128:
+                raise ValueError('Escribe tu teléfono y contraseña.')
         except ValueError as error:
             return jsonify(error=str(error)), 400
         now = ahora_utc()
         db.session.execute(text('BEGIN IMMEDIATE'))
-        usados = db.session.scalar(db.select(func.count()).select_from(EnvioSms).where(
-            EnvioSms.fecha >= now.replace(hour=0, minute=0, second=0, microsecond=0)))
-        if usados >= app.config['SMS_LIMITE_DIARIO']:
+        intento = db.session.get(IntentoAccesoCliente, telefono)
+        if not intento:
+            intento = IntentoAccesoCliente(telefono=telefono, ventana=now, intentos=0)
+            db.session.add(intento)
+        if intento.ventana < now - timedelta(minutes=15):
+            intento.ventana, intento.intentos = now, 0
+        if intento.intentos >= 5:
             db.session.rollback()
-            return jsonify(error='Se alcanzó el límite diario de códigos del salón. Intenta mañana.'), 429
-        challenge = db.session.get(VerificacionTelefono, telefono)
-        if challenge and challenge.enviado > now - timedelta(seconds=60):
-            db.session.rollback()
-            return jsonify(error='Espera un minuto antes de pedir otro código.'), 429
-        if challenge and challenge.ventana > now - timedelta(hours=1) and challenge.envios >= 3:
-            db.session.rollback()
-            return jsonify(error='Alcanzaste el límite de tres envíos por hora. Intenta más tarde.'), 429
-        if not challenge:
-            challenge = VerificacionTelefono(telefono=telefono, nombre=nombre.strip(),
-                                              enviado=now, ventana=now, envios=0, intentos=0)
-            db.session.add(challenge)
-        if challenge.ventana <= now - timedelta(hours=1):
-            challenge.ventana = now
-            challenge.envios = 0
-        challenge.envios += 1
-        challenge.enviado = now
-        challenge.nombre = nombre.strip()
-        challenge.intentos = 0
-        reference = secrets.token_urlsafe(32)
-        challenge.referencia = reference
-        db.session.add(EnvioSms(fecha=now))
+            return jsonify(error='Demasiados intentos. Espera 15 minutos o solicita ayuda en el salón.'), 429
+        intento.intentos += 1
         db.session.commit()
-        try:
-            provider.send(telefono)
-        except VerificacionNoDisponible:
-            challenge.referencia = None
-            db.session.commit()
-            return jsonify(error='No pudimos enviar el SMS. Revisa el número e intenta de nuevo en un minuto.'), 503
-        session['telefono_pendiente'] = reference
-        return jsonify(ok=True, telefono=telefono, vence_en=600)
-
-    @bp.route('/clientes/verificacion/comprobar', methods=['POST'])
-    def comprobar_codigo():
-        if not valid_csrf():
-            return jsonify(error='Recarga la página e intenta de nuevo.'), 400
-        reference = session.get('telefono_pendiente')
-        data = request.get_json(silent=True)
-        codigo = data.get('codigo', '') if isinstance(data, dict) else ''
-        if not isinstance(codigo, str) or not re.fullmatch(r'\d{4,10}', codigo):
-            return jsonify(error='Escribe el código numérico del SMS.'), 400
-        db.session.execute(text('BEGIN IMMEDIATE'))
-        challenge = db.session.scalar(db.select(VerificacionTelefono).filter_by(referencia=reference)) if reference else None
-        if not challenge or challenge.enviado < ahora_utc() - timedelta(minutes=10):
-            db.session.rollback()
-            return jsonify(error='El código venció. Solicita uno nuevo.'), 400
-        if challenge.intentos >= 5:
-            db.session.rollback()
-            return jsonify(error='Demasiados intentos. Solicita un nuevo código.'), 429
-        challenge.intentos += 1
-        telefono, nombre = challenge.telefono, challenge.nombre
-        db.session.commit()
-        try:
-            approved = app.extensions['sms_verify'].check(telefono, codigo)
-        except VerificacionNoDisponible:
-            return jsonify(error='No pudimos verificar el código. Intenta nuevamente.'), 503
-        if not approved:
-            return jsonify(error='El código no es válido o ya venció.'), 400
-        db.session.execute(text('BEGIN IMMEDIATE'))
-        challenge = db.session.get(VerificacionTelefono, telefono)
-        if challenge.referencia != reference or challenge.enviado < ahora_utc() - timedelta(minutes=10):
-            db.session.rollback()
-            return jsonify(error='Esta verificación ya no es válida. Solicita un nuevo código.'), 400
         cliente = db.session.scalar(db.select(Cliente).filter_by(telefono=telefono))
-        if not cliente:
-            cliente = Cliente(nombre=nombre, telefono=telefono)
-            db.session.add(cliente)
-        challenge.referencia = None
+        cuenta = db.session.get(CuentaCliente, cliente.id) if cliente else None
+        correcto = check_password_hash(cuenta.password_hash if cuenta else dummy_hash, password)
+        if not cuenta or not correcto:
+            return jsonify(error='Teléfono o contraseña incorrectos. Si olvidaste tu acceso, solicita ayuda presencial en el salón.'), 401
+        intento.intentos = 0
         db.session.commit()
-        session.pop('telefono_pendiente', None)
-        session.pop('csrf', None)
-        session['cliente_id'] = cliente.id
-        session.permanent = True
-        csrf_token()
+        iniciar_sesion(cliente, cuenta)
         return jsonify(ok=True, destino='/clientes')
 
     def inspiracion():
@@ -319,7 +284,8 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
                 continue
         temporada, ideas = inspiracion()
         return render_template('clientes_portal.html', cliente=cliente, csrf=csrf_token(),
-                               visitas=historial, puntos=sum(v.puntos for v in realizadas),
+                               visitas=historial, puntos=puntos_totales(cliente.id, historial),
+                               presencial=verificacion(cliente.id),
                                numero_visitas=len(realizadas), puntos_visita=puntos_visita,
                                ultimo=realizadas[0] if realizadas else None,
                                ultimo_retoque=next((v for v in realizadas if v.es_retoque), None),
@@ -331,10 +297,11 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
     def perfil():
         cliente = actual()
         if request.method == 'GET':
-            return render_template('clientes_perfil.html', cliente=cliente, csrf=csrf_token())
-        nombre = request.form.get('nombre', '').strip()
-        if not 2 <= len(nombre) <= 100:
-            return jsonify(error='El nombre debe tener de 2 a 100 caracteres.'), 400
+            return render_template('clientes_perfil.html', cliente=cliente, csrf=csrf_token(), presencial=verificacion(cliente.id))
+        try:
+            nombre = nombre_completo(request.form.get('nombre'))
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
         foto = request.files.get('foto')
         try:
             contenido = foto_jpeg(foto) if foto and foto.filename else None
@@ -365,6 +332,7 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
     @require_customer
     def salir():
         session.pop('cliente_id', None)
+        session.pop('cliente_version', None)
         session.pop('telefono_pendiente', None)
         session.pop('csrf', None)
         return redirect(url_for('clientes.acceso'))
@@ -373,7 +341,8 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
     @admin_page
     def listado_admin():
         clientes = db.session.scalars(db.select(Cliente).order_by(Cliente.nombre)).all()
-        return render_template('clientes_admin.html', clientes=clientes, seleccionado=None,
+        verificadas = set(db.session.scalars(db.select(VerificacionPresencial.cliente_id)).all())
+        return render_template('clientes_admin.html', clientes=clientes, seleccionado=None, verificadas=verificadas,
                                csrf=csrf_token(), puntos_visita=puntos_visita)
 
     @bp.route('/admin/clientes/<int:cliente_id>')
@@ -382,9 +351,49 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
         cliente = db.get_or_404(Cliente, cliente_id)
         historial = visitas(cliente.id)
         return render_template('clientes_admin.html', seleccionado=cliente, clientes=[],
-                               visitas=historial, puntos=sum(v.puntos for v in historial if not v.anulada),
+                               visitas=historial, puntos=puntos_totales(cliente.id, historial),
+                               presencial=verificacion(cliente.id), tiene_cuenta=bool(db.session.get(CuentaCliente, cliente.id)),
                                csrf=csrf_token(), puntos_visita=puntos_visita,
                                hoy=datetime.now(ZoneInfo('America/Mexico_City')).date())
+
+    @bp.route('/admin/clientes/<int:cliente_id>/verificar-presencial', methods=['POST'])
+    @admin_required
+    def verificar_presencial(cliente_id):
+        db.session.execute(text('BEGIN IMMEDIATE'))
+        db.get_or_404(Cliente, cliente_id)
+        bono = verificacion(cliente_id)
+        if bono:
+            db.session.rollback()
+            return jsonify(ok=True, puntos_otorgados=0)
+        db.session.add(VerificacionPresencial(cliente_id=cliente_id, puntos=10))
+        db.session.commit()
+        return jsonify(ok=True, puntos_otorgados=10)
+
+    @bp.route('/admin/clientes/<int:cliente_id>/restablecer-acceso', methods=['POST'])
+    @admin_required
+    def restablecer_acceso(cliente_id):
+        db.session.execute(text('BEGIN IMMEDIATE'))
+        cliente = db.get_or_404(Cliente, cliente_id)
+        if not verificacion(cliente_id):
+            return jsonify(error='Primero confirma presencialmente la identidad de la clienta.'), 400
+        data = request.get_json(silent=True)
+        try:
+            password = password_valida(data.get('password') if isinstance(data, dict) else None)
+            if data.get('password_confirmacion') != password:
+                raise ValueError('Las contraseñas no coinciden.')
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
+        intento = db.session.get(IntentoAccesoCliente, cliente.telefono)
+        if intento:
+            intento.intentos = 0
+        cuenta = db.session.get(CuentaCliente, cliente_id)
+        if cuenta:
+            cuenta.password_hash = generate_password_hash(password)
+            cuenta.version += 1
+        else:
+            db.session.add(CuentaCliente(cliente_id=cliente_id, password_hash=generate_password_hash(password)))
+        db.session.commit()
+        return jsonify(ok=True)
 
     @bp.route('/admin/clientes/<int:cliente_id>/visitas', methods=['POST'])
     @admin_required
