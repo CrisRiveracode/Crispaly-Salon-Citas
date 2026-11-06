@@ -1,0 +1,30 @@
+{% extends 'cotizaciones_base.html' %}
+{% block title %}Mi espacio · Crispaly Salon{% endblock %}
+{% block head %}
+<style>
+.hero { background:#ece2ce; border-radius:24px; padding:32px; margin-bottom:24px; }
+.hero h1 { max-width:650px; }
+.stats { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:24px; }
+.stat { margin:0; }
+.stat strong { display:block; font:36px Georgia,serif; margin:8px 0; }
+.avatar { width:88px; height:88px; border-radius:50%; background:#e0cda8; display:flex; align-items:center; justify-content:center; overflow:hidden; font:34px Georgia,serif; position:relative; flex:none; }
+.avatar img { width:100%; height:100%; object-fit:cover; position:absolute; inset:0; }
+.ideas { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+.idea { padding:0; overflow:hidden; }
+.idea figure { margin:0; background:#e6d8c2; min-height:190px; }
+.idea img { display:block; width:100%; height:210px; object-fit:cover; }
+.idea .copy { padding:20px; }
+.item { border-top:1px solid #ede5d7; padding:18px 0; }
+.item:first-of-type { border-top:0; }
+.access { max-width:620px; margin:auto; }
+.notice { border-left:3px solid #a1844e; padding:12px 18px; background:#f4eddf; }
+nav .links { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+nav button { padding:7px 10px; }
+@media(max-width:650px) { .stats,.ideas { grid-template-columns:1fr; } .hero { padding:24px; } .stat strong { font-size:30px; } }
+</style>
+{% endblock %}
+{% block navigation %}
+<nav><a class="brand" href="/clientes">Crispaly · Mi espacio</a>
+<div class="links"><a href="/">Reservar</a>{% if cliente %}<a href="/clientes">Mi portal</a><a href="/clientes/perfil">Mi perfil</a><form action="/clientes/salir" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">Salir</button></form>{% else %}<a href="/cotizar">Cotizar con fotos</a>{% endif %}</div>
+</nav>
+{% endblock %}

@@ -44,11 +44,12 @@ small { display:block; margin-top:5px; }
 .summary { border-left:3px solid #b8965a; padding-left:16px; }
 @media(max-width:600px) { .two { grid-template-columns:1fr; gap:0; } .card { padding:20px; } .button, button { max-width:100%; } }
 </style>
+{% block head %}{% endblock %}
 </head>
 <body><main>
-<nav><a class="brand" href="/">Crispaly Salon</a>
+{% block navigation %}<nav><a class="brand" href="/">Crispaly Salon</a>
 {% if request.path.startswith('/admin') %}<a href="/admin">Volver a la agenda</a>{% else %}<a href="/">Reservar una cita</a>{% endif %}
-</nav>
+</nav>{% endblock %}
 {% block content %}{% endblock %}
 </main>{% block scripts %}{% endblock %}</body>
 </html>

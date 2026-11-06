@@ -1,0 +1,33 @@
+{% extends 'cotizaciones_base.html' %}
+{% block title %}Clientes y visitas · Crispaly Salon{% endblock %}
+{% block content %}
+{% if not seleccionado %}
+<header class="intro"><div class="eyebrow">Administración</div><h1>Clientes y visitas</h1><p>Perfiles con teléfono verificado. Registra los servicios realizados para construir su historial y sumar puntos.</p></header>
+<section class="card"><label for="buscar">Buscar por nombre o teléfono</label><input id="buscar" type="search" placeholder="Nombre o número"><small>Las nuevas cuentas aparecen cuando terminan la verificación SMS.</small></section>
+<div id="clientes-lista">{% for c in clientes %}<article class="card cliente-item" data-busqueda="{{ (c.nombre ~ ' ' ~ c.telefono)|lower }}"><div class="row"><div><h2>{{ c.nombre }}</h2><p>{{ c.telefono }} · Teléfono verificado</p></div><a class="button" href="{{ url_for('clientes.detalle_admin', cliente_id=c.id) }}">Ver historial y registrar visita</a></div></article>{% else %}<section class="card"><h2>Todavía no hay clientes registrados.</h2><p>Comparte <a href="/clientes/acceso">el acceso al portal</a> cuando esté activada la verificación SMS.</p></section>{% endfor %}</div>
+<p id="sin-resultados" hidden>No hay coincidencias.</p>
+{% else %}
+<a href="/admin/clientes">← Todos los clientes</a>
+<header class="intro"><div class="eyebrow" style="margin-top:20px">Cliente verificado</div><h1>{{ seleccionado.nombre }}</h1><p>{{ seleccionado.telefono }}</p><span class="badge">{{ puntos }} puntos acumulados</span></header>
+<section class="card"><h2>Registrar una visita realizada</h2><p>Agrupa todos los servicios de esta visita en un registro. Se reconoce una visita por día y se suman {{ puntos_visita }} puntos. Una cita programada no genera puntos.</p>
+<form id="visita"><div class="two"><div><label for="fecha">Fecha de la visita</label><input id="fecha" type="date" value="{{ hoy }}" max="{{ hoy }}" required></div><div><label for="importe">Importe del servicio en MXN <span class="muted">(opcional)</span></label><input id="importe" type="number" min="0" max="1000000" step="0.01" placeholder="0.00"><small>Registra el importe, no un pago ni una deuda.</small></div></div>
+<label for="servicio">Servicios realizados</label><input id="servicio" minlength="2" maxlength="200" placeholder="Ej. Retoque de raíz + matiz + tratamiento" required>
+<label class="check"><input id="es-retoque" type="checkbox"><span>Esta visita incluyó un retoque de color.</span></label>
+<label for="proximo-retoque">Fecha sugerida del próximo retoque <span class="muted">(opcional)</span></label><input id="proximo-retoque" type="date"><small>Se muestra como sugerencia en el portal. No crea una reserva.</small>
+<label for="notas">Cuidados e indicaciones para el cliente</label><textarea id="notas" maxlength="2000" placeholder="Estas indicaciones serán visibles en su historial."></textarea>
+<button style="margin-top:18px" type="submit">Registrar visita y sumar {{ puntos_visita }} puntos</button></form><p id="mensaje" role="status"></p></section>
+<section class="card"><h2>Historial registrado</h2>{% for visita in visitas %}<article style="padding:18px 0;border-top:1px solid #eee7da"><div class="row"><h3>{{ visita.servicio }}</h3><span class="badge">{{ 'Anulada' if visita.anulada else '+' ~ visita.puntos ~ ' puntos' }}</span></div><p>{{ visita.fecha.strftime('%d/%m/%Y') }}{% if visita.es_retoque %} · Retoque{% endif %}</p>{% if visita.importe %}<p>{{ visita.importe|pesos }}</p>{% endif %}{% if visita.notas %}<p class="details">{{ visita.notas }}</p>{% endif %}{% if not visita.anulada %}<button class="danger anular" data-id="{{ visita.id }}" type="button">Anular registro y retirar sus puntos</button>{% else %}<small>Se conserva para consulta. No suma puntos ni visitas.</small>{% endif %}</article>{% else %}<p>Aún no hay servicios realizados registrados.</p>{% endfor %}</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if not seleccionado %}<script>
+document.getElementById('buscar').addEventListener('input',event=>{const query=event.target.value.toLowerCase().trim();let visibles=0;document.querySelectorAll('.cliente-item').forEach(item=>{item.hidden=!item.dataset.busqueda.includes(query);if(!item.hidden)visibles++;});document.getElementById('sin-resultados').hidden=visibles>0;});
+</script>{% else %}<script>
+const csrf={{ csrf|tojson }};
+const base={{ url_for('clientes.detalle_admin', cliente_id=seleccionado.id)|tojson }};
+const mensaje=document.getElementById('mensaje');
+async function guardar(url,data){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(data)});const body=await response.json();if(!response.ok)throw new Error(body.error||'No se pudo guardar.');return body;}
+document.getElementById('visita').addEventListener('submit',async event=>{event.preventDefault();const boton=event.currentTarget.querySelector('button');if(boton.disabled)return;boton.disabled=true;try{await guardar(base+'/visitas',{fecha:document.getElementById('fecha').value,servicio:document.getElementById('servicio').value,importe:document.getElementById('importe').value||'0',es_retoque:document.getElementById('es-retoque').checked,proximo_retoque:document.getElementById('proximo-retoque').value,notas:document.getElementById('notas').value});location.reload();}catch(error){mensaje.textContent=error.message;boton.disabled=false;}});
+document.querySelectorAll('.anular').forEach(boton=>boton.addEventListener('click',async()=>{if(!confirm('¿Anular este registro? Se retirarán sus puntos y se conservará el historial de la corrección.'))return;boton.disabled=true;try{await guardar(base+'/visitas/'+boton.dataset.id+'/anular',{});location.reload();}catch(error){mensaje.textContent=error.message;boton.disabled=false;}}));
+</script>{% endif %}
+{% endblock %}

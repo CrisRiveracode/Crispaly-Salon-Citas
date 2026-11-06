@@ -14,6 +14,7 @@ from collections import deque
 from time import monotonic
 from threading import Lock
 from cotizaciones import register_cotizaciones
+from clientes import register_clientes
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('SALON_DATABASE_URI', 'sqlite:///citas.db')
@@ -60,7 +61,7 @@ def admin_required(view):
 
 @app.after_request
 def private_responses(response):
-    if request.path.startswith('/admin') or request.path == '/citas' or request.path.startswith('/horarios_ocupados/') or request.path in ('/cotizar', '/cotizaciones'):
+    if request.path.startswith(('/admin', '/clientes')) or request.path == '/citas' or request.path.startswith('/horarios_ocupados/') or request.path in ('/cotizar', '/cotizaciones'):
         response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
@@ -89,13 +90,14 @@ class Bloqueo(db.Model):
 app.config['PUBLIC_BASE_URL'] = os.environ.get('PUBLIC_BASE_URL', 'https://crispaly-salon-citas.onrender.com')
 app.config['SALON_WHATSAPP'] = os.environ.get('SALON_WHATSAPP', '523315370476')
 register_cotizaciones(app, db, admin_required, csrf_token, valid_csrf)
+register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf)
 
 with app.app_context():
     db.create_all()
 
 @app.route('/')
 def inicio():
-    return render_template('index.html')
+    return render_template('index.html', cliente=app.extensions['clientes']['actual']())
 
 # Obtener citas ordenadas
 @app.route('/citas', methods=['GET'])
@@ -141,6 +143,9 @@ def crear_cita():
 
     try:
         db.session.execute(text('BEGIN IMMEDIATE'))
+        cliente = app.extensions['clientes']['actual']()
+        if cliente:
+            data['nombre'], data['contacto'] = cliente.nombre, cliente.telefono
         existe = Cita.query.filter_by(fecha=data['fecha'], hora=data['hora']).first()
         bloqueado = Bloqueo.query.filter(
             Bloqueo.fecha == data['fecha'], Bloqueo.hora.in_(['*', data['hora']])
@@ -216,8 +221,9 @@ def admin_login():
     session['admin'] = True
     csrf_token()
     destino = request.form.get('next', '')
-    if destino == '/admin/cotizaciones' or (
-        destino.startswith('/admin/cotizaciones/') and not any(c in destino for c in ('?', '#', '\\'))
+    if (destino in ('/admin/cotizaciones', '/admin/clientes')
+        or destino.startswith(('/admin/cotizaciones/', '/admin/clientes/'))) and not any(
+            c in destino for c in ('?', '#', '\\')
     ):
         return redirect(destino)
     return redirect(url_for('admin'))

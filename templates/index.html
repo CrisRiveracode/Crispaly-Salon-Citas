@@ -102,6 +102,10 @@ button {
     <h1>Crispaly Salon</h1>
 </div>
 
+<nav style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:20px;">
+    <a href="/clientes" style="color:#806126; font-weight:600;">{{ 'Mi portal' if cliente else 'Portal de clientes' }}</a>
+    <a href="/clientes/perfil" style="color:#806126;">{{ cliente.nombre if cliente else 'Registrarme / entrar' }}</a>
+</nav>
 <section class="card">
     <h2 style="color:#b8965a; font-size:22px;">¿Quieres un cambio de look?</h2>
     <p>Muéstranos tu cabello, comparte tus ideas y cuéntanos tu presupuesto. Te responderemos por WhatsApp con una cotización personalizada.</p>
@@ -109,9 +113,9 @@ button {
 </section>
 
 <form class="card" id="reserva">
-    <input type="text" id="nombre" placeholder="Nombre" aria-label="Nombre" maxlength="100" required>
+    <input type="text" id="nombre" value="{{ cliente.nombre if cliente else '' }}" placeholder="Nombre" aria-label="Nombre" maxlength="100" required>
 
-    <input type="tel" id="contacto" placeholder="Teléfono de contacto" aria-label="Teléfono de contacto" maxlength="100" required>
+    <input type="tel" id="contacto" value="{{ cliente.telefono if cliente else '' }}" placeholder="Teléfono de contacto" aria-label="Teléfono de contacto" maxlength="100" required>
     <select id="servicio" aria-label="Servicio" required>
         <option value="">Selecciona servicio</option>
         <option>Corte</option>

@@ -1,0 +1,57 @@
+{% extends 'clientes_base.html' %}
+{% block content %}
+<div class="access">
+<header class="intro"><div class="eyebrow">Tu belleza, tu historia</div><h1>Un espacio que se acuerda de ti.</h1><p>Tus citas, tus servicios y los puntos que ganas cada vez que vuelves al salón.</p></header>
+{% if not disponible %}
+<section class="card"><h2>Estamos preparando tu acceso.</h2><p>La verificación por SMS todavía no está activada. No crearemos cuentas sin verificar el teléfono.</p><p>Mientras tanto, puedes reservar tu cita o pedir una cotización personalizada.</p><div class="row"><a class="button" href="/">Reservar una cita</a><a href="/cotizar">Pedir cotización</a></div></section>
+{% else %}
+<section class="card">
+<form id="solicitar" {% if pendiente %}hidden{% endif %}>
+<h2>Regístrate o vuelve a entrar</h2><p class="muted">Tu teléfono identifica tu cuenta. Si ya te registraste, recuperaremos tu mismo perfil.</p>
+<label for="nombre">Tu nombre</label><input id="nombre" autocomplete="name" minlength="2" maxlength="100" required>
+<label for="telefono">Teléfono celular</label><input id="telefono" type="tel" autocomplete="tel" placeholder="Ej. 3312345678" maxlength="30" required><small>10 dígitos para México. Para otro país, incluye + y el código de país.</small>
+<label class="check"><input id="consentimiento" type="checkbox" required><span>Autorizo el envío de un código SMS para verificar mi teléfono y el registro de mis citas, servicios y puntos en mi cuenta privada.</span></label>
+<button type="submit" style="margin-top:16px">Recibir código SMS</button>
+</form>
+<form id="verificar" {% if not pendiente %}hidden{% endif %}>
+<h2>Revisa tu teléfono</h2><p>Solicitamos un código para <strong id="destino">{{ telefono }}</strong>. Puede tardar unos momentos en llegar.</p>
+<label for="codigo">Código del SMS</label><input id="codigo" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{4,10}" minlength="4" maxlength="10" required>
+<small>El código vence en 10 minutos. Nunca compartas tu código con otra persona.</small>
+<button type="submit" style="margin-top:16px">Verificar y entrar</button>
+<button type="button" class="secondary" id="cambiar" style="margin-top:12px">Cambiar número o pedir otro código</button>
+</form>
+<p id="mensaje" role="status" class="error"></p>
+</section>
+{% endif %}
+<p class="muted">Solo tú y el equipo autorizado del salón podrán consultar tu historial. Los puntos se registran después de una visita realizada.</p>
+</div>
+{% endblock %}
+{% block scripts %}
+{% if disponible %}<script>
+const csrf = {{ csrf|tojson }};
+const mensaje = document.getElementById('mensaje');
+const solicitar = document.getElementById('solicitar');
+const verificar = document.getElementById('verificar');
+async function enviar(url, datos) {
+ const response = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(datos)});
+ const data = await response.json();
+ if(!response.ok) throw new Error(data.error || 'No se pudo completar la verificación.');
+ return data;
+}
+solicitar.addEventListener('submit',async event=>{
+ event.preventDefault(); const boton=solicitar.querySelector('button'); if(boton.disabled) return;
+ boton.disabled=true; mensaje.textContent='Solicitando tu código…';
+ try {
+  const data=await enviar('/clientes/verificacion/enviar',{nombre:document.getElementById('nombre').value,telefono:document.getElementById('telefono').value,consentimiento:document.getElementById('consentimiento').checked});
+  document.getElementById('destino').textContent=data.telefono; solicitar.hidden=true; verificar.hidden=false; mensaje.textContent=''; document.getElementById('codigo').focus();
+ } catch(error) { mensaje.textContent=error.message; } finally { boton.disabled=false; }
+});
+verificar.addEventListener('submit',async event=>{
+ event.preventDefault(); const boton=verificar.querySelector('button'); if(boton.disabled) return;
+ boton.disabled=true; mensaje.textContent='Verificando…';
+ try { const data=await enviar('/clientes/verificacion/comprobar',{codigo:document.getElementById('codigo').value}); location.href=data.destino; }
+ catch(error){mensaje.textContent=error.message;boton.disabled=false;}
+});
+document.getElementById('cambiar').onclick=()=>{solicitar.hidden=false;verificar.hidden=true;document.getElementById('codigo').value='';mensaje.textContent='Espera al menos un minuto entre envíos. Máximo tres códigos por hora.';};
+</script>{% endif %}
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends 'clientes_base.html' %}
+{% block content %}
+<header class="intro"><div class="eyebrow">Mi perfil</div><h1>Aquí eres tú.</h1><p>Tu teléfono ya está verificado y es el identificador de tu cuenta.</p></header>
+<section class="card access"><div class="avatar">{{ cliente.nombre[:1]|upper }}{% if cliente.foto %}<img src="/clientes/perfil/foto" alt="Tu foto de perfil">{% endif %}</div>
+<form id="perfil" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="nombre">Nombre</label><input id="nombre" name="nombre" value="{{ cliente.nombre }}" minlength="2" maxlength="100" required>
+<label for="telefono">Teléfono verificado</label><input id="telefono" value="{{ cliente.telefono }}" readonly><small>Para cambiar tu teléfono, contacta al salón. No se cambia sin una nueva verificación.</small>
+<label for="foto">Foto de perfil <span class="muted">(opcional)</span></label><input id="foto" name="foto" type="file" accept="image/jpeg,image/png,image/webp"><small>JPG, PNG o WebP, máximo 5 MB. Solo tú y el equipo autorizado pueden verla.</small>
+<div class="row" style="justify-content:start;margin-top:20px"><button type="submit">Guardar mi perfil</button>{% if cliente.foto %}<button id="quitar-foto" class="secondary" type="button">Quitar foto</button>{% endif %}</div>
+</form><p id="mensaje" role="status">{{ 'Perfil actualizado.' if request.args.get('guardado') else '' }}</p>
+</section>
+{% endblock %}
+{% block scripts %}<script>
+const csrf={{ csrf|tojson }};
+const mensaje=document.getElementById('mensaje');
+document.getElementById('perfil').addEventListener('submit',async event=>{
+ event.preventDefault();const boton=event.currentTarget.querySelector('button');boton.disabled=true;
+ try {const response=await fetch('/clientes/perfil',{method:'POST',body:new FormData(event.currentTarget)});const data=await response.json();if(!response.ok)throw new Error(data.error);location.href='/clientes/perfil?guardado=1';}
+ catch(error){mensaje.textContent=error.message||'No se pudo guardar.';boton.disabled=false;}
+});
+const quitar=document.getElementById('quitar-foto');
+if(quitar)quitar.onclick=async()=>{quitar.disabled=true;try{const response=await fetch('/clientes/perfil/foto/eliminar',{method:'POST',headers:{'X-CSRF-Token':csrf}});if(!response.ok)throw new Error('No se pudo quitar la foto.');location.reload();}catch(error){mensaje.textContent=error.message;quitar.disabled=false;}};
+</script>{% endblock %}
