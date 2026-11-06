@@ -10,7 +10,7 @@ import secrets
 import phonenumbers
 from flask import (Blueprint, jsonify, redirect, render_template, request,
                    send_file, session, url_for)
-from sqlalchemy import text
+from database import begin_write
 from sqlalchemy.exc import IntegrityError
 from zoneinfo import ZoneInfo
 from cotizaciones import dinero_centavos, foto_jpeg
@@ -232,7 +232,7 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
         except ValueError as error:
             return jsonify(error=str(error)), 400
         now = ahora_utc()
-        db.session.execute(text('BEGIN IMMEDIATE'))
+        begin_write(db)
         intento = db.session.get(IntentoAccesoCliente, telefono)
         if not intento:
             intento = IntentoAccesoCliente(telefono=telefono, ventana=now, intentos=0)
@@ -359,7 +359,7 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
     @bp.route('/admin/clientes/<int:cliente_id>/verificar-presencial', methods=['POST'])
     @admin_required
     def verificar_presencial(cliente_id):
-        db.session.execute(text('BEGIN IMMEDIATE'))
+        begin_write(db)
         db.get_or_404(Cliente, cliente_id)
         bono = verificacion(cliente_id)
         if bono:
@@ -372,7 +372,7 @@ def register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf):
     @bp.route('/admin/clientes/<int:cliente_id>/restablecer-acceso', methods=['POST'])
     @admin_required
     def restablecer_acceso(cliente_id):
-        db.session.execute(text('BEGIN IMMEDIATE'))
+        begin_write(db)
         cliente = db.get_or_404(Cliente, cliente_id)
         if not verificacion(cliente_id):
             return jsonify(error='Primero confirma presencialmente la identidad de la clienta.'), 400

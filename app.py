@@ -15,9 +15,13 @@ from time import monotonic
 from threading import Lock
 from cotizaciones import register_cotizaciones
 from clientes import register_clientes
+from database import database_url, begin_write
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('SALON_DATABASE_URI', 'sqlite:///citas.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url(os.environ)
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_pre_ping': True, 'pool_recycle': 300, 'hide_parameters': True}
+if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgresql'):
+    app.config['SQLALCHEMY_ENGINE_OPTIONS']['connect_args'] = {'connect_timeout': 10}
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 admin_password = os.environ.get('ADMIN_PASSWORD', '')
@@ -114,7 +118,7 @@ def ver_citas():
         "estado": c.estado
     } for c in citas])
 
-# Crear cita y reservar el horario de forma atómica en SQLite.
+# Crear cita y reservar el horario de forma atómica.
 @app.route('/crear_cita', methods=['POST'])
 def crear_cita():
     data = request.get_json(silent=True)
@@ -142,7 +146,7 @@ def crear_cita():
         return jsonify(error="Elige una fecha futura y un horario disponible del salón"), 400
 
     try:
-        db.session.execute(text('BEGIN IMMEDIATE'))
+        begin_write(db)
         cliente = app.extensions['clientes']['actual']()
         if cliente:
             data['nombre'], data['contacto'] = cliente.nombre, cliente.telefono
@@ -260,7 +264,7 @@ def admin_bloqueos():
     except (ValueError, TypeError):
         return jsonify(error="Selecciona una fecha válida y un horario del salón"), 400
     try:
-        db.session.execute(text('BEGIN IMMEDIATE'))
+        begin_write(db)
         citas = Cita.query.filter_by(fecha=fecha)
         if hora != '*':
             citas = citas.filter_by(hora=hora)

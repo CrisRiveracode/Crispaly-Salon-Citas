@@ -2,6 +2,9 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import os
+import uuid
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from concurrent.futures import ThreadPoolExecutor
 import unittest
 from unittest.mock import patch
@@ -17,7 +20,17 @@ class ReservasTest(unittest.TestCase):
         def factory(*args, **kwargs):
             return Flask(*args, **kwargs, instance_path=self.temp.name,
                          root_path=str(source.parent))
-        with patch('flask.Flask', factory), patch.dict(os.environ, {'ADMIN_PASSWORD': 'solo-pruebas-123456', 'RENDER': 'false'}):
+        self.pg_engine = None
+        settings = {'ADMIN_PASSWORD':'solo-pruebas-123456','RENDER':'false',
+                    'DATABASE_URL':'','SALON_DATABASE_URI':'sqlite:///citas.db'}
+        if os.environ.get('TEST_DATABASE_URL'):
+            self.pg_engine = create_engine(os.environ['TEST_DATABASE_URL'], hide_parameters=True)
+            self.pg_schema = 'test_' + uuid.uuid4().hex
+            with self.pg_engine.begin() as connection:
+                connection.execute(text('CREATE SCHEMA ' + self.pg_schema))
+            settings['DATABASE_URL'] = make_url(os.environ['TEST_DATABASE_URL']).update_query_dict(
+                {'options':'-csearch_path=' + self.pg_schema}).render_as_string(hide_password=False)
+        with patch('flask.Flask', factory), patch.dict(os.environ, settings):
             spec.loader.exec_module(self.module)
         self.client = self.module.app.test_client()
         self.admin = self.module.app.test_client()
@@ -34,6 +47,10 @@ class ReservasTest(unittest.TestCase):
         with self.module.app.app_context():
             self.module.db.session.remove()
             self.module.db.engine.dispose()
+        if self.pg_engine:
+            with self.pg_engine.begin() as connection:
+                connection.execute(text('DROP SCHEMA ' + self.pg_schema + ' CASCADE'))
+            self.pg_engine.dispose()
         self.temp.cleanup()
 
     def test_reservar_consultar_y_eliminar(self):

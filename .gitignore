@@ -4,3 +4,5 @@ instance/
 .venv/
 .env
 .env.*
+backups/
+*.sqlite3
