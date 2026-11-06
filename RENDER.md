@@ -1,4 +1,4 @@
-# Render
+# Crispaly Salon · Render + Neon
 
 - Build command: `pip install -r requirements.txt`
 - Start command: `gunicorn app:app --bind 0.0.0.0:$PORT`
@@ -8,17 +8,47 @@
 - El panel permite consultar las citas y los contactos, cancelar citas y bloquear/desbloquear horas o días completos. No se puede bloquear un horario con citas existentes sin cancelarlas primero.
 - Los horarios usan la zona America/Mexico_City. Las nuevas tablas se crean al arrancar; no se elimina la tabla de citas.
 
-## PostgreSQL en Render (producción)
+## PostgreSQL en Neon (producción)
 
-La aplicación usa `DATABASE_URL` como primera opción. Acepta las URL `postgres://` y `postgresql://` que entrega Render y usa el controlador psycopg 3. Para conexiones remotas exige cifrado SSL y conserva modos más estrictos como `verify-full` si ya están configurados. Las conexiones y sus parámetros no deben publicarse.
+La aplicación Flask conserva SQLAlchemy y psycopg 3. No necesita un controlador JavaScript ni migrar el backend a Node. Acepta `postgres://` / `postgresql://` y exige SSL para conexiones remotas. Las URL contienen credenciales: no imprimirlas, subirlas a Git ni compartirlas por chat.
 
-1. Crear **New → PostgreSQL**, en la misma región del servicio web. Revisar el precio, si tiene fecha de vencimiento, persistencia y respaldos del plan elegido. No se presupone que un plan gratuito dure indefinidamente o tenga respaldos automáticos.
-2. Copiar **Internal Database URL**. En el servicio web → **Environment**, guardar una variable **DATABASE_URL** con ese valor privado. No ponerla en Git, comandos compartidos ni capturas.
-3. Conservar `ADMIN_PASSWORD` y una `SECRET_KEY` privada estable. Si existía `SALON_DATABASE_URI` de SQLite, eliminarla para no dejar una configuración obsoleta; `DATABASE_URL` tiene prioridad.
-4. Usar el comando de compilación y arranque del inicio de este documento y desplegar el commit que incorpora PostgreSQL. Las tablas nuevas se crean automáticamente al arrancar, sin borrar datos existentes.
-5. En una base inicialmente vacía, registrar una cuenta de prueba, iniciar sesión, crear una cita y comprobarla. Reiniciar el servicio web y volver a iniciar sesión para confirmar la persistencia. Verificar también el plan de respaldos y realizar una restauración de prueba antes de depender de datos reales.
+### Conexión desde la consola
 
-En Render, la aplicación **no arranca si falta DATABASE_URL o se intenta usar SQLite**. Esto evita que un despliegue cree silenciosamente otro archivo temporal vacío. Un despliegue fallido no demuestra que PostgreSQL esté conectado: hay que corregir la variable y comprobar el servicio.
+1. En Neon, abrir el proyecto `flat-wildflower-41039415` de la organización `org-still-leaf-75693054`, rama `production`, y pulsar **Connect**.
+2. Copiar la conexión agrupada (Connection pooling) y guardarla como `DATABASE_URL` en el servicio web de Render → Environment. Si el panel presenta un comando `psql`, copiar únicamente su URL, sin comando ni comillas, conservando los parámetros SSL.
+3. Copiar la conexión directa, sin agrupación, y guardarla como `DATABASE_URL_UNPOOLED`. Ambas deben apuntar a la misma rama y base. Se usa la agrupada para consultas y la directa para preparar el esquema y migraciones. El programa rechaza combinar conexiones de distintas ramas o bases.
+4. Conservar `ADMIN_PASSWORD` y una `SECRET_KEY` estable. Retirar una variable `SALON_DATABASE_URI` antigua de SQLite. Guardar y desplegar el servicio web en Render.
+5. Registrar una cuenta de prueba, crear una cita y comprobarla; reiniciar el servicio web y confirmar que el perfil sigue disponible. Revisar los límites de almacenamiento y restauración del plan Neon. No se presupone almacenamiento ilimitado ni respaldo permanente gratuito.
+
+### Flujo de la CLI Neon
+
+```sh
+npm i -g neon@latest
+neon login
+neon init -y --org-id org-still-leaf-75693054 --project-id flat-wildflower-41039415 --branch production --services postgres
+neon deploy
+```
+
+`neon init` sin autenticación puede escribir `.neon` y `neon.ts` sin verificar el proyecto. Eso no demuestra conexión. La configuración generada conserva solo PostgreSQL y no reemplaza el sistema de acceso de clientes. `neon deploy` debe completar correctamente y descargar variables a `.env.local` (o `.env`). Nunca copiar el contenido de esos archivos a logs o Git.
+
+La aplicación carga `.env.local` y `.env`, manteniendo prioridad de las variables del proceso sobre los archivos y preservando los valores literales. En Render, configurar las mismas variables mediante su panel; los archivos locales no se publican.
+
+Preparar dependencias locales y comprobar:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+npm ci
+npm run build
+npm start
+```
+
+`npm run build` verifica los tipos de `neon.ts`, compila los módulos Python y ejecuta la suite. `npm start` arranca Gunicorn en `PORT` (5000 por defecto). El build de Render puede seguir siendo `pip install -r requirements.txt`, con el comando Gunicorn del inicio; Node solo es necesario para la CLI y sus comprobaciones locales.
+
+Para reanudar después de un fallo, primero corregir el acceso a `console.neon.tech` y `oauth2.neon.tech` y completar `neon login` en el mismo entorno. Ejecutar después `neon deploy`. La API y el login fallaron durante esta configuración por HTTP 403 del proxy, y no se descargaron variables ni se validó la base remota. Instalar o escribir configuración sin esos pasos no equivale a provisionar ni conectar la base.
+
+En Render, la aplicación no arranca sin PostgreSQL configurado; no crea silenciosamente otra base SQLite temporal. Se revisan las conexiones del pool antes de usarlas, se configura tiempo máximo de conexión y se desactivan sentencias preparadas persistentes para conexiones agrupadas. Los bloqueos transaccionales de PostgreSQL mantienen la protección de reservas y bonos duplicados.
 
 El proyecto mantiene SQLite únicamente para desarrollo local y exportación. `pool_pre_ping` verifica conexiones del pool y se configura un tiempo máximo para establecer la conexión. Los bloqueos transaccionales de PostgreSQL evitan reservas simultáneas incompatibles y bonos duplicados, manteniendo también las restricciones únicas.
 

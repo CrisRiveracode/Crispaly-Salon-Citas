@@ -22,7 +22,7 @@ class ReservasTest(unittest.TestCase):
                          root_path=str(source.parent))
         self.pg_engine = None
         settings = {'ADMIN_PASSWORD':'solo-pruebas-123456','RENDER':'false',
-                    'DATABASE_URL':'','SALON_DATABASE_URI':'sqlite:///citas.db'}
+                    'DATABASE_URL':'','DATABASE_URL_UNPOOLED':'','SALON_DATABASE_URI':'sqlite:///citas.db'}
         if os.environ.get('TEST_DATABASE_URL'):
             self.pg_engine = create_engine(os.environ['TEST_DATABASE_URL'], hide_parameters=True)
             self.pg_schema = 'test_' + uuid.uuid4().hex
@@ -30,7 +30,7 @@ class ReservasTest(unittest.TestCase):
                 connection.execute(text('CREATE SCHEMA ' + self.pg_schema))
             settings['DATABASE_URL'] = make_url(os.environ['TEST_DATABASE_URL']).update_query_dict(
                 {'options':'-csearch_path=' + self.pg_schema}).render_as_string(hide_password=False)
-        with patch('flask.Flask', factory), patch.dict(os.environ, settings):
+        with patch('flask.Flask', factory), patch.dict(os.environ, settings), patch('database.load_local_environment'):
             spec.loader.exec_module(self.module)
         self.client = self.module.app.test_client()
         self.admin = self.module.app.test_client()

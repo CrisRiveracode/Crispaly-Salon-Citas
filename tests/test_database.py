@@ -2,7 +2,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import sqlite3
 import unittest
-from database import database_url
+import os
+from unittest.mock import Mock, patch
+from database import database_url, load_local_environment, initialize_schema
+from sqlalchemy.engine import make_url
 from tools.migrate_sqlite import backup_sqlite
 
 
@@ -26,6 +29,27 @@ class DatabaseConfigTest(unittest.TestCase):
     def test_error_de_url_no_expone_credenciales(self):
         with self.assertRaises(RuntimeError) as error:database_url({'DATABASE_URL':'postgresql://test:secreto-prueba@host:puerto/db'})
         self.assertNotIn('secreto-prueba',str(error.exception))
+
+    def test_env_neon_prioridad_y_credenciales_literales(self):
+        with TemporaryDirectory() as root:
+            root=Path(root)
+            (root/'.env').write_text('DATABASE_URL=base\nOTRA_VARIABLE=base\n')
+            (root/'.env.local').write_text('DATABASE_URL=local-con-$literal\nOTRA_VARIABLE=local\n')
+            with patch.dict(os.environ, {}, clear=True):
+                load_local_environment(root)
+                self.assertEqual(os.environ['DATABASE_URL'], 'local-con-$literal')
+                self.assertEqual(os.environ['OTRA_VARIABLE'], 'local')
+            with patch.dict(os.environ, {'DATABASE_URL':'valor-del-servidor'}, clear=True):
+                load_local_environment(root)
+                self.assertEqual(os.environ['DATABASE_URL'], 'valor-del-servidor')
+
+    def test_esquema_no_se_prepara_en_otra_rama(self):
+        db=Mock()
+        db.engine.url=make_url('postgresql+psycopg://test:fake@ep-app-pooler.example.test/salon')
+        with patch('database.create_engine') as create:
+            with self.assertRaises(RuntimeError):
+                initialize_schema(db, {'DATABASE_URL_UNPOOLED':'postgresql://test:fake@ep-otro.example.test/salon'})
+            create.assert_not_called()
 
     def test_respaldo_consistente_no_sobreescribe(self):
         with TemporaryDirectory() as root:

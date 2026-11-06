@@ -15,13 +15,15 @@ from time import monotonic
 from threading import Lock
 from cotizaciones import register_cotizaciones
 from clientes import register_clientes
-from database import database_url, begin_write
+from database import database_url, begin_write, load_local_environment, initialize_schema
+
+load_local_environment(os.path.dirname(os.path.abspath(__file__)))
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url(os.environ)
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_pre_ping': True, 'pool_recycle': 300, 'hide_parameters': True}
 if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgresql'):
-    app.config['SQLALCHEMY_ENGINE_OPTIONS']['connect_args'] = {'connect_timeout': 10}
+    app.config['SQLALCHEMY_ENGINE_OPTIONS']['connect_args'] = {'connect_timeout': 10, 'prepare_threshold': None}
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 admin_password = os.environ.get('ADMIN_PASSWORD', '')
@@ -97,7 +99,7 @@ register_cotizaciones(app, db, admin_required, csrf_token, valid_csrf)
 register_clientes(app, db, Cita, admin_required, csrf_token, valid_csrf)
 
 with app.app_context():
-    db.create_all()
+    initialize_schema(db, os.environ)
 
 @app.route('/')
 def inicio():

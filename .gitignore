@@ -6,3 +6,5 @@ instance/
 .env.*
 backups/
 *.sqlite3
+.neon
+node_modules/

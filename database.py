@@ -1,7 +1,39 @@
 """Configuración PostgreSQL y exclusión mutua de operaciones críticas."""
-from sqlalchemy import text
+from pathlib import Path
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+
+
+def load_local_environment(root):
+    """Neon escribe .env.local; las variables del proceso siempre tienen prioridad."""
+    root = Path(root)
+    for name in ('.env.local', '.env'):
+        load_dotenv(root / name, override=False, interpolate=False)
+
+
+def initialize_schema(db, environ):
+    direct = environ.get('DATABASE_URL_UNPOOLED')
+    if not direct:
+        db.create_all()
+        return
+    uri = database_url({'DATABASE_URL':direct})
+    if not uri.startswith('postgresql'):
+        raise RuntimeError('DATABASE_URL_UNPOOLED debe ser una conexión PostgreSQL directa.')
+    app_url = make_url(db.engine.url)
+    direct_url = make_url(uri)
+    app_host = (app_url.host or app_url.query.get('host', '')).replace('-pooler.', '.')
+    direct_host = direct_url.host or direct_url.query.get('host', '')
+    if app_host != direct_host or app_url.database != direct_url.database:
+        raise RuntimeError('Las conexiones agrupada y directa deben apuntar a la misma base y rama de Neon.')
+    engine = create_engine(uri, poolclass=NullPool, hide_parameters=True,
+                           connect_args={'connect_timeout':10, 'prepare_threshold':None})
+    try:
+        db.metadata.create_all(bind=engine)
+    finally:
+        engine.dispose()
 
 
 def database_url(environ):

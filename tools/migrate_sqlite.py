@@ -36,6 +36,8 @@ def backup_sqlite(source, backup):
 def migrate(source, backup, target_engine, metadata):
     if target_engine.dialect.name != 'postgresql':
         raise MigrationError('El destino debe ser PostgreSQL.')
+    if '-pooler.' in (target_engine.url.host or ''):
+        raise MigrationError('Para migrar usa DATABASE_URL_UNPOOLED, la conexión directa de Neon.')
     snapshot = backup_sqlite(source, backup)
     source_engine = create_engine('sqlite://', creator=lambda: sqlite3.connect(
         'file:' + quote(str(snapshot)) + '?mode=ro', uri=True), hide_parameters=True)
@@ -92,12 +94,21 @@ def main():
     parser.add_argument('--source', required=True, help='Archivo SQLite conservado del servicio anterior')
     parser.add_argument('--backup', required=True, help='Ruta nueva para un respaldo privado; no debe existir')
     args = parser.parse_args()
+    from database import load_local_environment
+    load_local_environment(Path(__file__).resolve().parents[1])
     if not os.environ.get('DATABASE_URL'):
         parser.error('Configura DATABASE_URL de forma privada; no se acepta por la línea de comandos.')
     try:
         from app import app, db
         with app.app_context():
-            counts = migrate(args.source, args.backup, db.engine, db.metadata)
+            from database import database_url
+            direct = os.environ.get('DATABASE_URL_UNPOOLED')
+            engine = create_engine(database_url({'DATABASE_URL':direct}), hide_parameters=True, connect_args={'connect_timeout':10, 'prepare_threshold':None}) if direct else db.engine
+            try:
+                counts = migrate(args.source, args.backup, engine, db.metadata)
+            finally:
+                if direct:
+                    engine.dispose()
         print('Copia completada y recuentos verificados: ' + str(sum(counts.values())) + ' registros.')
         print('El respaldo y el archivo de origen se conservaron. No se modificó el SQLite original.')
     except (MigrationError, FileExistsError) as error:
